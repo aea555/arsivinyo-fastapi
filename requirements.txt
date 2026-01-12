@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+yt-dlp
+ffmpeg-python
+redis
+celery
+tenacity
+pydantic
+firebase-admin
+python-multipart
+python-dotenv
+aiofiles
+anyio

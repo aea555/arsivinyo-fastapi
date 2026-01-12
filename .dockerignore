@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+downloads
+cookies
+logs
+venv
+.venv
+Dockerfile
+docker-compose.yml
+.env
+firebase-auth.json
