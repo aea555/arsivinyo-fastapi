@@ -6,6 +6,10 @@ services:
       - "6380:6379"
     volumes:
       - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
   api:
     build: .
@@ -14,23 +18,31 @@ services:
     ports:
       - "127.0.0.1:8001:8000"
     volumes:
-      - ./downloads:/app/downloads
-      - ./cookies:/app/cookies
+      - ./downloads:/app/downloads:z
+      - ./cookies:/app/cookies:z
       - ./firebase-auth.json:/app/firebase-auth.json:ro,z
     depends_on:
       - redis
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   worker:
     build: .
     container_name: downloader_worker
     env_file: .env
     volumes:
-      - ./downloads:/app/downloads
-      - ./cookies:/app/cookies
+      - ./downloads:/app/downloads:z
+      - ./cookies:/app/cookies:z
     depends_on:
       - redis
-    command: celery -A app.tasks worker --loglevel=info --concurrency=4 --max-tasks-per-child=10
+    command: celery -A app.tasks worker --loglevel=info --concurrency=2 --max-tasks-per-child=5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   nginx:
     image: nginx:1.29.4-alpine-slim
@@ -42,6 +54,10 @@ services:
       - ./downloads:/app/downloads:ro,z
     depends_on:
       - api
+    deploy:
+      resources:
+        limits:
+          memory: 64M
 
 volumes:
   redis_data:

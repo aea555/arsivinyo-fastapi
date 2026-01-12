@@ -1,11 +1,11 @@
 import yt_dlp
 import os
-import logging
 from typing import Dict, Any, Optional, Tuple
 
 from tenacity import retry, stop_after_attempt, wait_exponential
+from app.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class Downloader:
     def __init__(self, download_path: str = "downloads"):
@@ -17,8 +17,21 @@ class Downloader:
         """Extract information from the URL without downloading."""
         from app.cookie_manager import cookie_manager
         
-        # Detect platform from URL (very basic detection)
-        platform = "youtube" if "youtube" in url or "youtu.be" in url else "generic"
+        # Detect platform from URL
+        if "youtube" in url or "youtu.be" in url:
+            platform = "youtube"
+        elif "twitter.com" in url or "x.com" in url:
+            platform = "twitter"
+        elif "instagram.com" in url:
+            platform = "instagram"
+        elif "tiktok.com" in url:
+            platform = "tiktok"
+        elif "reddit.com" in url:
+            platform = "reddit"
+        elif "facebook.com" in url or "fb.watch" in url:
+            platform = "facebook"
+        else:
+            platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
 
         ydl_opts = {
@@ -102,7 +115,20 @@ class Downloader:
         """Download media from the given URL."""
         from app.cookie_manager import cookie_manager
         
-        platform = "youtube" if "youtube" in url or "youtu.be" in url else "generic"
+        if "youtube" in url or "youtu.be" in url:
+            platform = "youtube"
+        elif "twitter.com" in url or "x.com" in url:
+            platform = "twitter"
+        elif "instagram.com" in url:
+            platform = "instagram"
+        elif "tiktok.com" in url:
+            platform = "tiktok"
+        elif "reddit.com" in url:
+            platform = "reddit"
+        elif "facebook.com" in url or "fb.watch" in url:
+            platform = "facebook"
+        else:
+            platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
 
         # Base options - prefer formats with known size, limit to 50MB

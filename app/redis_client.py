@@ -1,9 +1,9 @@
 import redis
 import os
-import logging
 from typing import Optional
+from app.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class RedisClient:
     _instance: Optional['RedisClient'] = None

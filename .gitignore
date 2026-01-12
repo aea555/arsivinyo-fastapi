@@ -3,9 +3,10 @@ __pycache__/
 *$py.class
 .env
 venv/
-.venv/
+# User Data
 downloads/
-cookies/
+cookies/*
+!cookies/.gitkeep
 logs/
 *.mp4
 *.mkv

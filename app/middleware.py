@@ -9,8 +9,9 @@ import firebase_admin
 from firebase_admin import app_check, credentials
 import os
 import logging
+from app.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Initialize Firebase Admin SDK (Only if not in dev bypass mode or if config is explicitly provided)
 is_prod = os.getenv("ENV", "development").lower() == "production"
@@ -40,9 +41,14 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         
         can_bypass = is_dev and request_secret == app_secret
         
+        # DEBUG: Log bypass status
+        if request.url.path == "/download":
+            logger.debug(f"IP={client_ip}, can_bypass={can_bypass}")
+        
         # 3. Check if IP is banned
         if redis_client.is_available() and not can_bypass:
             if redis_client.client.exists(f"ban:{client_ip}"):
+                logger.warning(f"[429 BANNED] IP={client_ip}")
                 return self._fail_response("TOO_MANY_REQUESTS", 429, "You are temporarily banned due to spamming.")
 
         # 4. Firebase App Check (Professional Grade)
@@ -65,6 +71,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 redis_client.client.expire(rate_limit_key, 3600)
             
             if current_hits > RATE_LIMIT_REQUESTS_PER_HOUR:
+                logger.warning(f"[429 RATE_LIMIT] IP={client_ip}, hits={current_hits}")
                 return self._fail_response("TOO_MANY_REQUESTS", 429, f"Rate limit exceeded ({RATE_LIMIT_REQUESTS_PER_HOUR}/hr).")
 
 
@@ -95,9 +102,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                         redis_client.client.expire(spam_hits_key, 60)
                     
                     if hits >= 5:
+                        logger.warning(f"[429 SPAM_BAN] IP={client_ip}, hits={hits}")
                         redis_client.client.set(f"ban:{client_ip}", "true", ex=300) # 5 min ban
                         return self._fail_response("SPAM_DETECTED", 429, "Spam detected. You are banned for 5 minutes.")
                     
+                    logger.info(f"[202 IDEMPOTENCY] IP={client_ip}, URL already processing")
                     return self._fail_response("DOWNLOAD_ALREADY_IN_PROGRESS", 202, "This URL is already being processed.")
             
             # Restore body for the endpoint by creating a new receive callable

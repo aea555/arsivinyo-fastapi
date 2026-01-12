@@ -5,10 +5,10 @@ from app.schemas.result import Result
 from app.redis_client import redis_client
 from app.config import MAX_FILE_SIZE_MB
 import os
-import logging
 from datetime import datetime
+from app.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def track_volume(client_ip: str, file_size_mb: float):
