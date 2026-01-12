@@ -12,13 +12,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Initialize Firebase Admin SDK
+# Initialize Firebase Admin SDK (Only if not in dev bypass mode or if config is explicitly provided)
+is_prod = os.getenv("ENV", "development").lower() == "production"
 firebase_cert_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+firebase_initialized = False
+
 if firebase_cert_path and os.path.exists(firebase_cert_path):
-    cred = credentials.Certificate(firebase_cert_path)
-    firebase_admin.initialize_app(cred)
-else:
-    logger.warning("Firebase Service Account JSON not found. App Check will be bypassed in dev mode.")
+    try:
+        cred = credentials.Certificate(firebase_cert_path)
+        firebase_admin.initialize_app(cred)
+        firebase_initialized = True
+        logger.info("Firebase Admin SDK initialized successfully.")
+    except Exception as e:
+        logger.error(f"Firebase initialization failed: {e}. App Check will be bypassed if enabled.")
+elif is_prod:
+    logger.warning("FIREBASE_SERVICE_ACCOUNT_JSON not found in PRODUCTION! App Check will fail.")
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -38,7 +46,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 return self._fail_response("TOO_MANY_REQUESTS", 429, "You are temporarily banned due to spamming.")
 
         # 4. Firebase App Check (Professional Grade)
-        if firebase_cert_path and not can_bypass:
+        if firebase_initialized and not can_bypass:
             app_check_token = request.headers.get("X-Firebase-AppCheck")
             if not app_check_token:
                 return self._fail_response("INVALID_TOKEN", 401, "Missing App Check token.")
@@ -48,19 +56,31 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 logger.error(f"App Check verification failed: {e}")
                 return self._fail_response("INVALID_TOKEN", 401, "Invalid App Check token.")
 
-        # 5. Rate Limiting (30/hr)
+        # 5. Rate Limiting (per hour)
         if redis_client.is_available() and not can_bypass:
+            from app.config import RATE_LIMIT_REQUESTS_PER_HOUR
             rate_limit_key = f"rate_limit:{client_ip}"
             current_hits = redis_client.client.incr(rate_limit_key)
             if current_hits == 1:
                 redis_client.client.expire(rate_limit_key, 3600)
             
-            if current_hits > 30:
-                return self._fail_response("TOO_MANY_REQUESTS", 429, "Rate limit exceeded (30/hr).")
+            if current_hits > RATE_LIMIT_REQUESTS_PER_HOUR:
+                return self._fail_response("TOO_MANY_REQUESTS", 429, f"Rate limit exceeded ({RATE_LIMIT_REQUESTS_PER_HOUR}/hr).")
+
+
+        # (Volume limit check moved to API endpoint for pre-flight verification)
+
 
         # 6. Idempotency & Spam Detection
         if request.method == "POST" and "/download" in request.url.path and not can_bypass:
-            body = await request.json()
+            # Cache the body so it can be read again by the endpoint
+            body_bytes = await request.body()
+            try:
+                import json
+                body = json.loads(body_bytes)
+            except json.JSONDecodeError:
+                body = {}
+                
             url = body.get("url", "")
             if url:
                 url_hash = hashlib.sha256(url.encode()).hexdigest()
@@ -79,6 +99,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                         return self._fail_response("SPAM_DETECTED", 429, "Spam detected. You are banned for 5 minutes.")
                     
                     return self._fail_response("DOWNLOAD_ALREADY_IN_PROGRESS", 202, "This URL is already being processed.")
+            
+            # Restore body for the endpoint by creating a new receive callable
+            async def receive():
+                return {"type": "http.request", "body": body_bytes}
+            request._receive = receive
 
         response = await call_next(request)
         return response

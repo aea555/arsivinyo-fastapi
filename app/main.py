@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response
 from fastapi.responses import JSONResponse, FileResponse
+from scalar_fastapi import get_scalar_api_reference
 from app.schemas.result import Result
 from app.middleware import SecurityMiddleware
 from app.tasks import download_media_task
@@ -13,11 +14,25 @@ import shutil
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Determine environment
+is_production = os.getenv("ENV", "development").lower() == "production"
+
 app = FastAPI(
     title="Media Downloader API",
     description="API for downloading media from various platforms with metadata manipulation.",
-    version="1.0.0"
+    version="1.0.0",
+    # Disable default docs in production (Scalar will be used instead)
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
 )
+
+# Add Scalar API Reference (modern documentation UI)
+@app.get("/scalar", include_in_schema=False)
+async def scalar_docs():
+    return get_scalar_api_reference(
+        openapi_url=app.openapi_url,
+        title=app.title,
+    )
 
 # Add Security Middleware
 app.add_middleware(SecurityMiddleware)
@@ -50,8 +65,74 @@ async def start_download(request: Request):
             content=Result.fail("INVALID_URL", 400).with_message("URL is required.").dict()
         )
     
-    # Trigger Celery Task
-    task = download_media_task.delay(url)
+    # Get client IP for volume tracking
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
+    
+    # --- PRE-FLIGHT SIZE CHECK ---
+    # Check file size BEFORE queueing the download task
+    from app.downloader import Downloader
+    
+    try:
+        downloader = Downloader()
+        info = downloader.get_info(url)
+        
+        # Get estimated file size using improved multi-method estimation
+        size_mb, estimation_method = downloader.estimate_file_size_mb(info)
+        logger.info(f"Pre-flight size estimate: {size_mb:.1f}MB (method: {estimation_method})")
+        
+        # Import limits from config
+        from app.config import MAX_FILE_SIZE_MB, MAX_HOURLY_VOLUME_MB
+
+        
+        # Check 1: Single file size limit (50MB)
+        if size_mb > MAX_FILE_SIZE_MB:
+            return JSONResponse(
+                status_code=413,
+                content=Result.fail("FILE_TOO_LARGE", 413).with_message(
+                    f"File size ({size_mb:.1f}MB) exceeds limit ({MAX_FILE_SIZE_MB}MB)"
+                ).dict()
+            )
+        
+        # Check 2: Hourly volume limit - would this file exceed remaining quota?
+        if redis_client.is_available():
+            volume_key = f"volume_mb:{client_ip}"
+            current_volume = redis_client.client.get(volume_key)
+            current_volume_mb = float(current_volume) if current_volume else 0.0
+            
+            # If size is known, check if it would exceed quota
+            if size_mb > 0:
+                projected_volume = current_volume_mb + size_mb
+                if projected_volume > MAX_HOURLY_VOLUME_MB:
+                    return JSONResponse(
+                        status_code=429,
+                        content=Result.fail("VOLUME_LIMIT_EXCEEDED", 429).with_message(
+                            f"This download ({size_mb:.1f}MB) would exceed hourly limit. "
+                            f"Current: {current_volume_mb:.1f}MB, Limit: {MAX_HOURLY_VOLUME_MB}MB"
+                        ).dict()
+                    )
+            else:
+                # Size unknown - check if we have remaining quota (at least 50MB buffer)
+                if current_volume_mb >= (MAX_HOURLY_VOLUME_MB - MAX_FILE_SIZE_MB):
+                    return JSONResponse(
+                        status_code=429,
+                        content=Result.fail("VOLUME_LIMIT_EXCEEDED", 429).with_message(
+                            f"Cannot determine file size and quota is low ({current_volume_mb:.1f}MB/{MAX_HOURLY_VOLUME_MB}MB)"
+                        ).dict()
+                    )
+        
+        logger.info(f"Pre-flight check passed: {url} - estimated size: {size_mb:.1f}MB")
+        
+    except Exception as e:
+        logger.error(f"Pre-flight check failed for {url}: {e}")
+        return JSONResponse(
+            status_code=400,
+            content=Result.fail("PREFLIGHT_FAILED", 400).with_message(
+                f"Could not verify media info: {str(e)}"
+            ).dict()
+        )
+    
+    # Trigger Celery Task with client IP for volume tracking
+    task = download_media_task.delay(url, client_ip)
     
     # Store task mapping in Redis for idempotency (matching hash in middleware)
     import hashlib
@@ -59,7 +140,14 @@ async def start_download(request: Request):
     if redis_client.is_available():
         redis_client.client.set(f"download_status:{url_hash}", task.id, ex=3600)
 
-    return Result.ok("DOWNLOAD_STARTED", 202).with_data({"task_id": task.id})
+    return JSONResponse(
+        status_code=202,
+        content=Result.ok("DOWNLOAD_STARTED", 202).with_data({
+            "task_id": task.id,
+            "estimated_size_mb": round(size_mb, 1) if size_mb > 0 else None
+        }).dict()
+    )
+
 
 @app.get("/status/{task_id}")
 async def get_status(task_id: str):

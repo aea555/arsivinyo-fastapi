@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 T = TypeVar("T")
 
-class Result(Generic[T], BaseModel):
+class Result(BaseModel, Generic[T]):
     success: bool = False
     code: str = ""
     status_code: int = 200
