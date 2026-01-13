@@ -1,9 +1,9 @@
 import os
-import logging
 from typing import List, Optional
 import random
+from app.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class CookieManager:
     """Manages a pool of cookie files for different platforms to avoid being blocked."""
