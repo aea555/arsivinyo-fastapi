@@ -1,10 +1,11 @@
 import yt_dlp
 import os
-import logging
-from typing import Dict, Any, Optional
-from tenacity import retry, stop_after_attempt, wait_exponential
+from typing import Dict, Any, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+from tenacity import retry, stop_after_attempt, wait_exponential
+from app.logger import get_logger
+
+logger = get_logger(__name__)
 
 class Downloader:
     def __init__(self, download_path: str = "downloads"):
@@ -16,15 +17,42 @@ class Downloader:
         """Extract information from the URL without downloading."""
         from app.cookie_manager import cookie_manager
         
-        # Detect platform from URL (very basic detection)
-        platform = "youtube" if "youtube" in url or "youtu.be" in url else "generic"
+        # Detect platform from URL
+        if "youtube" in url or "youtu.be" in url:
+            platform = "youtube"
+        elif "twitter.com" in url or "x.com" in url:
+            platform = "twitter"
+        elif "instagram.com" in url:
+            platform = "instagram"
+        elif "tiktok.com" in url:
+            platform = "tiktok"
+        elif "reddit.com" in url:
+            platform = "reddit"
+        elif "facebook.com" in url or "fb.watch" in url:
+            platform = "facebook"
+        else:
+            platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
 
+        # Custom options based on platform
+        format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
+        
+        if platform == "tiktok":
+             # Force H.264 (avc) for TikTok to ensure preview compatibility
+             # Use bestvideo+bestaudio to ensure we get both streams if separated
+            format_selector = "best[ext=mp4][vcodec^=avc][acodec!=none]/best[ext=mp4]/best"
+        elif platform == "reddit":
+            # Reddit usually uses DASH/HLS, so we need to validly merge audio+video
+            # Metadata is often missing, so we drop filesize constraints to avoid 'No format available'
+            format_selector = 'bestvideo+bestaudio/best'
+             
         ydl_opts = {
             'quiet': True,
-            'no_warnings': True,
-            'format': 'best',
+            'no_warnings': True,    
+            # Prefer formats with known filesize, limit to 50MB
+            'format': format_selector,
             'cookiefile': cookie_file if cookie_file else None,
+            'noplaylist': True, # Explicitly disable playlist processing
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
@@ -34,39 +62,164 @@ class Downloader:
                 logger.error(f"Error extracting info for {url}: {e}")
                 raise
 
+    def estimate_file_size_mb(self, info: Dict[str, Any]) -> Tuple[float, str]:
+        """
+        Estimate file size in MB using multiple methods.
+        
+        Returns:
+            Tuple of (estimated_size_mb, method_used)
+            method_used: 'filesize', 'filesize_approx', 'duration_bitrate', 'formats_sum', 'unknown'
+        """
+        # Method 1: Direct filesize from selected format
+        filesize = info.get('filesize')
+        if filesize and filesize > 0:
+            return filesize / (1024 * 1024), 'filesize'
+        
+        # Method 2: Approximate filesize
+        filesize_approx = info.get('filesize_approx')
+        if filesize_approx and filesize_approx > 0:
+            return filesize_approx / (1024 * 1024), 'filesize_approx'
+        
+        # Method 3: Calculate from duration and bitrate (tbr = total bitrate in kbps)
+        duration = info.get('duration')  # seconds
+        tbr = info.get('tbr')  # total bitrate in kbps
+        if duration and tbr:
+            # size = (bitrate_kbps * duration_seconds) / 8 / 1024 = MB
+            size_mb = (tbr * duration) / 8 / 1024
+            return size_mb, 'duration_bitrate'
+        
+        # Method 4: Sum video and audio format sizes (for DASH)
+        formats = info.get('formats', [])
+        if formats:
+            # Find best video and audio formats with known sizes
+            video_size = 0
+            audio_size = 0
+            
+            for fmt in formats:
+                fmt_size = fmt.get('filesize') or fmt.get('filesize_approx') or 0
+                vcodec = fmt.get('vcodec', 'none')
+                acodec = fmt.get('acodec', 'none')
+                
+                # Video only format
+                if vcodec != 'none' and acodec == 'none':
+                    if fmt_size > video_size:
+                        video_size = fmt_size
+                # Audio only format
+                elif acodec != 'none' and vcodec == 'none':
+                    if fmt_size > audio_size:
+                        audio_size = fmt_size
+            
+            if video_size > 0 or audio_size > 0:
+                total_size = video_size + audio_size
+                return total_size / (1024 * 1024), 'formats_sum'
+        
+        # Method 5: Estimate from duration with average bitrate assumption
+        if duration:
+            # Assume average 2 Mbps for YouTube shorts, 5 Mbps for regular videos
+            is_shorts = duration < 180  # Less than 3 minutes
+            avg_bitrate_kbps = 2000 if is_shorts else 5000
+            size_mb = (avg_bitrate_kbps * duration) / 8 / 1024
+            return size_mb, 'duration_estimate'
+        
+        return 0, 'unknown'
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def download(self, url: str, filename: Optional[str] = None) -> str:
         """Download media from the given URL."""
         from app.cookie_manager import cookie_manager
         
-        platform = "youtube" if "youtube" in url or "youtu.be" in url else "generic"
+        if "youtube" in url or "youtu.be" in url:
+            platform = "youtube"
+        elif "twitter.com" in url or "x.com" in url:
+            platform = "twitter"
+        elif "instagram.com" in url:
+            platform = "instagram"
+        elif "tiktok.com" in url:
+            platform = "tiktok"
+        elif "reddit.com" in url:
+            platform = "reddit"
+        elif "facebook.com" in url or "fb.watch" in url:
+            platform = "facebook"
+        else:
+            platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
 
-        # Base options
+        # Base options - prefer formats with known size, limit to 50MB
+        format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
+        
+        if platform == "tiktok":
+             # Force H.264 (avc) for TikTok
+             format_selector = 'bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        elif platform == "reddit":
+            format_selector = 'bestvideo+bestaudio/best'
+
         ydl_opts = {
-            'format': 'best',
+            'format': format_selector,
             'outtmpl': os.path.join(self.download_path, filename or '%(title)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'cookiefile': cookie_file if cookie_file else None,
+            'noplaylist': True, # Explicitly disable playlist processing
+            'merge_output_format': 'mp4', # Ensure final container is MP4 (fixes black screen/audio-only issues)
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=True)
-                downloaded_file = ydl.prepare_filename(info)
+                downloaded_file = None
+
+                # 1) Most reliable: yt-dlp tells you exactly what it wrote
+                req = info.get("requested_downloads") or []
+                for r in reversed(req):
+                    fp = r.get("filepath")
+                    if fp and os.path.exists(fp):
+                        downloaded_file = fp
+                        break
+
+                # 2) Fallbacks
+                if not downloaded_file:
+                    fp = info.get("filepath") or info.get("_filename")
+                    if fp and os.path.exists(fp):
+                        downloaded_file = fp
+
+                # 3) Last resort: use prepare_filename, but also prefer a merged .mp4 if it exists
+                if not downloaded_file:
+                    cand = ydl.prepare_filename(info)
+                    base, _ = os.path.splitext(cand)
+                    mp4_cand = base + ".mp4"
+                    if os.path.exists(mp4_cand):
+                        downloaded_file = mp4_cand
+                    else:
+                        downloaded_file = cand
+
+                logger.info(
+                    f"Downloaded: ext={info.get('ext')} "
+                    f"format_id={info.get('format_id')} "
+                    f"requested={[(d.get('ext'), d.get('filepath')) for d in (info.get('requested_downloads') or [])]}"
+                )
+
                 return downloaded_file
+
             except Exception as e:
                 logger.error(f"Error downloading {url}: {e}")
                 raise
 
-    def check_file_size(self, info: Dict[str, Any], limit_mb: int = 10) -> bool:
-        """Check if the predicted file size is within limits. Return False if size unknown."""
-        filesize = info.get('filesize') or info.get('filesize_approx')
-        if filesize:
-            size_mb = filesize / (1024 * 1024)
-            return size_mb <= limit_mb
+    def check_file_size(self, info: Dict[str, Any], limit_mb: int = 50) -> bool:
+        """Check if the predicted file size is within limits.
         
-        # Strict: If we can't determine size, reject it.
-        logger.warning(f"Could not determine file size for {info.get('url')}, rejecting.")
-        return False
+        Returns:
+            True if size is within limit OR if size cannot be determined (permissive mode)
+            False only if size is known AND exceeds limit
+        """
+        size_mb, method = self.estimate_file_size_mb(info)
+        
+        if size_mb > 0:
+            logger.info(f"Estimated file size: {size_mb:.1f}MB (method: {method})")
+            if size_mb > limit_mb:
+                logger.warning(f"File size {size_mb:.1f}MB exceeds {limit_mb}MB limit")
+                return False
+            return True
+        
+        # Permissive: If we can't determine size, allow it but log a warning
+        logger.warning(f"Could not determine file size for {info.get('title', 'unknown')}, allowing download")
+        return True

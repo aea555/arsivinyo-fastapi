@@ -9,36 +9,58 @@ import firebase_admin
 from firebase_admin import app_check, credentials
 import os
 import logging
+from app.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-# Initialize Firebase Admin SDK
+# Initialize Firebase Admin SDK (Only if not in dev bypass mode or if config is explicitly provided)
+is_prod = os.getenv("ENV", "development").lower() == "production"
 firebase_cert_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+firebase_initialized = False
+
 if firebase_cert_path and os.path.exists(firebase_cert_path):
-    cred = credentials.Certificate(firebase_cert_path)
-    firebase_admin.initialize_app(cred)
-else:
-    logger.warning("Firebase Service Account JSON not found. App Check will be bypassed in dev mode.")
+    try:
+        cred = credentials.Certificate(firebase_cert_path)
+        firebase_admin.initialize_app(cred)
+        firebase_initialized = True
+        logger.info("Firebase Admin SDK initialized successfully.")
+    except Exception as e:
+        logger.error(f"Firebase initialization failed: {e}. App Check will be bypassed if enabled.")
+elif is_prod:
+    logger.warning("FIREBASE_SERVICE_ACCOUNT_JSON not found in PRODUCTION! App Check will fail.")
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # 0. Allow OPTIONS (CORS Preflight) - Critical for Production
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         # 1. Get Client IP
         client_ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
         
-        # 2. Bypass for Testing/Dev (X-App-Secret)
-        is_dev = os.getenv("ENV", "development").lower() != "production"
-        app_secret = os.getenv("APP_SECRET_KEY", "dev_secret_bypass")
+        # 2. VIP / Developer Bypass (X-App-Secret)
+        # Allows trusted apps (e.g. invalid-free family version) to bypass App Check AND Rate Limits
+        app_secret = os.getenv("APP_SECRET_KEY") # Must be set in .env!
         request_secret = request.headers.get("X-App-Secret")
         
-        can_bypass = is_dev and request_secret == app_secret
+        # Security Note: If APP_SECRET_KEY is not set in env, deny bypass by default for safety
+        can_bypass = (app_secret is not None) and (request_secret == app_secret)
+        
+        # Store VIP status for endpoints (to skip volume limits etc.)
+        request.state.is_vip = can_bypass
+        
+        # DEBUG: Log bypass status
+        if request.url.path == "/download":
+            logger.debug(f"IP={client_ip}, can_bypass={can_bypass}")
         
         # 3. Check if IP is banned
         if redis_client.is_available() and not can_bypass:
             if redis_client.client.exists(f"ban:{client_ip}"):
+                logger.warning(f"[429 BANNED] IP={client_ip}")
                 return self._fail_response("TOO_MANY_REQUESTS", 429, "You are temporarily banned due to spamming.")
 
         # 4. Firebase App Check (Professional Grade)
-        if firebase_cert_path and not can_bypass:
+        if firebase_initialized and not can_bypass:
             app_check_token = request.headers.get("X-Firebase-AppCheck")
             if not app_check_token:
                 return self._fail_response("INVALID_TOKEN", 401, "Missing App Check token.")
@@ -48,19 +70,32 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 logger.error(f"App Check verification failed: {e}")
                 return self._fail_response("INVALID_TOKEN", 401, "Invalid App Check token.")
 
-        # 5. Rate Limiting (30/hr)
+        # 5. Rate Limiting (per hour)
         if redis_client.is_available() and not can_bypass:
+            from app.config import RATE_LIMIT_REQUESTS_PER_HOUR
             rate_limit_key = f"rate_limit:{client_ip}"
             current_hits = redis_client.client.incr(rate_limit_key)
             if current_hits == 1:
                 redis_client.client.expire(rate_limit_key, 3600)
             
-            if current_hits > 30:
-                return self._fail_response("TOO_MANY_REQUESTS", 429, "Rate limit exceeded (30/hr).")
+            if current_hits > RATE_LIMIT_REQUESTS_PER_HOUR:
+                logger.warning(f"[429 RATE_LIMIT] IP={client_ip}, hits={current_hits}")
+                return self._fail_response("TOO_MANY_REQUESTS", 429, f"Rate limit exceeded ({RATE_LIMIT_REQUESTS_PER_HOUR}/hr).")
+
+
+        # (Volume limit check moved to API endpoint for pre-flight verification)
+
 
         # 6. Idempotency & Spam Detection
         if request.method == "POST" and "/download" in request.url.path and not can_bypass:
-            body = await request.json()
+            # Cache the body so it can be read again by the endpoint
+            body_bytes = await request.body()
+            try:
+                import json
+                body = json.loads(body_bytes)
+            except json.JSONDecodeError:
+                body = {}
+                
             url = body.get("url", "")
             if url:
                 url_hash = hashlib.sha256(url.encode()).hexdigest()
@@ -75,10 +110,17 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                         redis_client.client.expire(spam_hits_key, 60)
                     
                     if hits >= 5:
+                        logger.warning(f"[429 SPAM_BAN] IP={client_ip}, hits={hits}")
                         redis_client.client.set(f"ban:{client_ip}", "true", ex=300) # 5 min ban
                         return self._fail_response("SPAM_DETECTED", 429, "Spam detected. You are banned for 5 minutes.")
                     
+                    logger.info(f"[202 IDEMPOTENCY] IP={client_ip}, URL already processing")
                     return self._fail_response("DOWNLOAD_ALREADY_IN_PROGRESS", 202, "This URL is already being processed.")
+            
+            # Restore body for the endpoint by creating a new receive callable
+            async def receive():
+                return {"type": "http.request", "body": body_bytes}
+            request._receive = receive
 
         response = await call_next(request)
         return response

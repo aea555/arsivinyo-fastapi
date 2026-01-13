@@ -1,9 +1,10 @@
 import ffmpeg
 import os
-import logging
 from datetime import datetime
+from typing import Optional
+from app.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def update_creation_time(file_path: str, timestamp: Optional[datetime] = None) -> str:
     """Updates the creation_time metadata of a media file using FFmpeg stream copy."""

@@ -1,0 +1,113 @@
+{
+    "info": {
+        "_postman_id": "media-downloader-api-collection",
+        "name": "Media Downloader API",
+        "description": "Collection for testing Media Downloader API endpoints.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        ""
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Start Download",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                    },
+                    {
+                        "key": "X-App-Secret",
+                        "value": "dev_secret_bypass",
+                        "type": "text",
+                        "disabled": true,
+                        "description": "Enable this to bypass rate limits (Dev only, Direct API port 8000 only)"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"url\": \"https://www.youtube.com/shorts/ksBNx1vBm_0\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/download",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "download"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Check Task Status",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/status/:taskId",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "status",
+                        ":taskId"
+                    ],
+                    "variable": [
+                        {
+                            "key": "taskId",
+                            "value": "replace_with_task_id",
+                            "description": "Task ID returned from /download"
+                        }
+                    ]
+                }
+            },
+            "response": []
+        }
+    ],
+    "event": [
+        {
+            "listen": "prerequest",
+            "script": {
+                "type": "text/javascript",
+                "exec": [
+                    ""
+                ]
+            }
+        },
+        {
+            "listen": "test",
+            "script": {
+                "type": "text/javascript",
+                "exec": [
+                    ""
+                ]
+            }
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://YOUR_VPS_IP:8090",
+            "type": "string"
+        }
+    ]
+}

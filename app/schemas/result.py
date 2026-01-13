@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 T = TypeVar("T")
 
-class Result(Generic[T], BaseModel):
+class Result(BaseModel, Generic[T]):
     success: bool = False
     code: str = ""
     status_code: int = 200
@@ -19,8 +19,7 @@ class Result(Generic[T], BaseModel):
         return cls(success=False, code=code, status_code=status_code)
 
     def with_data(self, data: T) -> "Result[T]":
-        if not self.success:
-            raise ValueError("Cannot add data to a failed result")
+        # Allow data even on failure (e.g. for validation errors or debug info)
         self.data = data
         return self
 
