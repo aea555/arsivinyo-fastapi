@@ -79,8 +79,8 @@ async def start_download(request: Request):
         )
     
     
-    # Get client IP for volume tracking
-    client_ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
+    # Get client IP for volume tracking (Prefer Cloudflare Header)
+    client_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
     
     # Clean and validate URL (Youtube Playlist Logic)
     from app.utils import clean_youtube_url, clean_tiktok_url

@@ -35,8 +35,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        # 1. Get Client IP
-        client_ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
+        # 1. Get Client IP (Prefer Cloudflare Header)
+        client_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
         
         # 2. VIP / Developer Bypass (X-App-Secret)
         # Allows trusted apps (e.g. invalid-free family version) to bypass App Check AND Rate Limits

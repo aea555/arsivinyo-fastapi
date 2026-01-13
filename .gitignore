@@ -19,3 +19,4 @@ logs/
 .vscode/
 firebase-auth.json
 docs/VIP_GUIDE.md
+docs/FULL_DEPLOYMENT.md
