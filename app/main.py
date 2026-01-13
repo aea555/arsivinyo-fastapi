@@ -25,6 +25,8 @@ app = FastAPI(
     redoc_url=None if is_production else "/redoc",
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+
 # Add Scalar API Reference (modern documentation UI)
 @app.get("/scalar", include_in_schema=False)
 async def scalar_docs():
@@ -32,6 +34,18 @@ async def scalar_docs():
         openapi_url=app.openapi_url,
         title=app.title,
     )
+
+# CORS Configuration
+# Since this is a Mobile API secured by App Check, we can be permissive with CORS
+# to allow usage of tools like Scalar/Swagger and development from local web.
+# Real security comes from the App Check token, not the Origin header.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (App Check protects us)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Add Security Middleware
 app.add_middleware(SecurityMiddleware)

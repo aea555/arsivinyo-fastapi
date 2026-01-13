@@ -31,10 +31,15 @@ elif is_prod:
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # 0. Allow OPTIONS (CORS Preflight) - Critical for Production
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         # 1. Get Client IP
         client_ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
         
         # 2. Bypass for Testing/Dev (X-App-Secret)
+        # In Production, is_dev is False, so can_bypass is always False
         is_dev = os.getenv("ENV", "development").lower() != "production"
         app_secret = os.getenv("APP_SECRET_KEY", "dev_secret_bypass")
         request_secret = request.headers.get("X-App-Secret")

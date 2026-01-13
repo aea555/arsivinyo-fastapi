@@ -6,7 +6,7 @@ Bu döküman, Media Downloader API'sinin nasıl kullanılacağını ve yapıland
 
 ## 📌 Genel Bakış
 
-Media Downloader API, YouTube, Twitter, Instagram, TikTok ve diğer platformlardan medya indirmenizi sağlar. İndirilen dosyaların `creation_time` metadata'sı otomatik olarak güncel zaman damgasıyla güncellenir.
+Media Downloader API, YouTube, Twitter, Instagram, TikTok, Facebook, Reddit ve diğer platformlardan medya indirmenizi sağlar. İndirilen dosyaların `creation_time` metadata'sı otomatik olarak güncel zaman damgasıyla güncellenir.
 
 ### Temel Özellikler
 - **Asenkron İndirme**: Celery ile arka planda işlem
@@ -137,9 +137,9 @@ GET /files/{task_id}
 
 | Limit | Değer |
 |-------|-------|
-| İstek/Saat | 30 |
-| MB/Saat | 50 MB |
-| Dosya Başına | 10 MB |
+| İstek/Saat | 180 |
+| MB/Saat | 250 MB |
+| Dosya Başına | 50 MB |
 | Spam Ban Süresi | 5 dakika |
 
 ---
@@ -155,7 +155,9 @@ GET /files/{task_id}
 | `FILE_NOT_READY` | 404 | Dosya henüz hazır değil |
 | `FILE_NOT_FOUND` | 404 | Dosya bulunamadı |
 | `TOO_MANY_REQUESTS` | 429 | Rate limit aşıldı |
+| `VOLUME_LIMIT_EXCEEDED` | 429 | Saatlik veri limiti aşıldı |
 | `SPAM_DETECTED` | 429 | Spam tespit edildi, geçici ban |
+| `FILE_TOO_LARGE` | 413 | Dosya boyutu sınırı aşıldı (>50MB) |
 | `INTERNAL_ERROR` | 500 | Sunucu hatası |
 
 ---
@@ -220,7 +222,7 @@ Frontend'in API'yi nasıl kullanması gerektiğini gösteren tam akış:
 │            │         ┌────────────────┼────────────────┐    │
 │            │         │                │                │    │
 │            │         ▼                ▼                ▼    │
-│            │     PENDING          STARTED          SUCCESS  │
+│            │     PENDING          PROGRESS         SUCCESS  │
 │            │         │                │                │    │
 │            │         └───────┬────────┘                │    │
 │            │                 │                         │    │
@@ -260,7 +262,7 @@ interface DownloadStartResponse {
 
 interface TaskStatusResponse {
   task_id: string;
-  status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE';
+  status: 'PENDING' | 'STARTED' | 'PROGRESS' | 'SUCCESS' | 'FAILURE';
   file_path?: string;
   filename?: string;
 }
@@ -275,6 +277,7 @@ const headers = {
   // Development bypass (remove in production)
   ...__DEV__ && { 'X-App-Secret': 'dev_secret_bypass' },
   // Production: Add Firebase App Check token here
+  // 'X-Firebase-AppCheck': await firebase.appCheck().getToken().then(res => res.token),
 };
 
 async function downloadMedia(url: string): Promise<string> {

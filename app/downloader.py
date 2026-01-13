@@ -41,6 +41,10 @@ class Downloader:
              # Force H.264 (avc) for TikTok to ensure preview compatibility
              # Use bestvideo+bestaudio to ensure we get both streams if separated
             format_selector = "best[ext=mp4][vcodec^=avc][acodec!=none]/best[ext=mp4]/best"
+        elif platform == "reddit":
+            # Reddit usually uses DASH/HLS, so we need to validly merge audio+video
+            # Metadata is often missing, so we drop filesize constraints to avoid 'No format available'
+            format_selector = 'bestvideo+bestaudio/best'
              
         ydl_opts = {
             'quiet': True,
@@ -146,6 +150,8 @@ class Downloader:
         if platform == "tiktok":
              # Force H.264 (avc) for TikTok
              format_selector = 'bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        elif platform == "reddit":
+            format_selector = 'bestvideo+bestaudio/best'
 
         ydl_opts = {
             'format': format_selector,
