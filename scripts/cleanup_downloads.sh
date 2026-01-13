@@ -16,9 +16,10 @@ echo "Max age: $MAX_AGE_MINUTES minutes"
 echo "========================================"
 
 # Check if download directory exists
+# Check if download directory exists, create if not
 if [ ! -d "$DOWNLOAD_DIR" ]; then
-    echo "Download directory not found: $DOWNLOAD_DIR"
-    exit 1
+    echo "Creating download directory: $DOWNLOAD_DIR"
+    mkdir -p "$DOWNLOAD_DIR"
 fi
 
 # Get current disk usage
@@ -59,7 +60,8 @@ if [ "$DISK_USAGE" -gt "$MAX_DISK_USAGE_PERCENT" ]; then
 fi
 
 # Remove empty directories
-find "$DOWNLOAD_DIR" -type d -empty -delete 2>/dev/null
+# Remove empty directories (but NOT the root download dir)
+find "$DOWNLOAD_DIR" -mindepth 1 -type d -empty -delete 2>/dev/null
 
 # Count files after cleanup
 FILES_AFTER=$(find "$DOWNLOAD_DIR" -type f | wc -l)
