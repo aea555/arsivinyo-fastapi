@@ -109,8 +109,12 @@ async def start_download(request: Request):
         from app.config import MAX_FILE_SIZE_MB, MAX_HOURLY_VOLUME_MB
 
         
+        is_vip = getattr(request.state, "is_vip", False)
+        if is_vip:
+            logger.info(f"VIP Request detected (IP={client_ip}). Skipping limits.")
+
         # Check 1: Single file size limit (50MB)
-        if size_mb > MAX_FILE_SIZE_MB:
+        if not is_vip and size_mb > MAX_FILE_SIZE_MB:
             return JSONResponse(
                 status_code=413,
                 content=Result.fail("FILE_TOO_LARGE", 413).with_message(
@@ -118,8 +122,9 @@ async def start_download(request: Request):
                 ).dict()
             )
         
+        
         # Check 2: Hourly volume limit - would this file exceed remaining quota?
-        if redis_client.is_available():
+        if not is_vip and redis_client.is_available():
             volume_key = f"volume_mb:{client_ip}"
             current_volume = redis_client.client.get(volume_key)
             current_volume_mb = float(current_volume) if current_volume else 0.0

@@ -38,13 +38,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # 1. Get Client IP
         client_ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
         
-        # 2. Bypass for Testing/Dev (X-App-Secret)
-        # In Production, is_dev is False, so can_bypass is always False
-        is_dev = os.getenv("ENV", "development").lower() != "production"
-        app_secret = os.getenv("APP_SECRET_KEY", "dev_secret_bypass")
+        # 2. VIP / Developer Bypass (X-App-Secret)
+        # Allows trusted apps (e.g. invalid-free family version) to bypass App Check AND Rate Limits
+        app_secret = os.getenv("APP_SECRET_KEY") # Must be set in .env!
         request_secret = request.headers.get("X-App-Secret")
         
-        can_bypass = is_dev and request_secret == app_secret
+        # Security Note: If APP_SECRET_KEY is not set in env, deny bypass by default for safety
+        can_bypass = (app_secret is not None) and (request_secret == app_secret)
+        
+        # Store VIP status for endpoints (to skip volume limits etc.)
+        request.state.is_vip = can_bypass
         
         # DEBUG: Log bypass status
         if request.url.path == "/download":

@@ -18,3 +18,4 @@ logs/
 .idea/
 .vscode/
 firebase-auth.json
+docs/VIP_GUIDE.md
