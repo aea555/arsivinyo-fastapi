@@ -34,12 +34,21 @@ class Downloader:
             platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
 
+        # Custom options based on platform
+        format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
+        
+        if platform == "tiktok":
+             # Force H.264 (avc) for TikTok to ensure preview compatibility
+             # Use bestvideo+bestaudio to ensure we get both streams if separated
+            format_selector = "best[ext=mp4][vcodec^=avc][acodec!=none]/best[ext=mp4]/best"
+             
         ydl_opts = {
             'quiet': True,
-            'no_warnings': True,
+            'no_warnings': True,    
             # Prefer formats with known filesize, limit to 50MB
-            'format': 'best[filesize<50M]/best[filesize_approx<50M]/best',
+            'format': format_selector,
             'cookiefile': cookie_file if cookie_file else None,
+            'noplaylist': True, # Explicitly disable playlist processing
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
@@ -132,19 +141,59 @@ class Downloader:
         cookie_file = cookie_manager.get_cookie_file(platform)
 
         # Base options - prefer formats with known size, limit to 50MB
+        format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
+        
+        if platform == "tiktok":
+             # Force H.264 (avc) for TikTok
+             format_selector = 'bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+
         ydl_opts = {
-            'format': 'best[filesize<50M]/best[filesize_approx<50M]/best',
+            'format': format_selector,
             'outtmpl': os.path.join(self.download_path, filename or '%(title)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'cookiefile': cookie_file if cookie_file else None,
+            'noplaylist': True, # Explicitly disable playlist processing
+            'merge_output_format': 'mp4', # Ensure final container is MP4 (fixes black screen/audio-only issues)
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=True)
-                downloaded_file = ydl.prepare_filename(info)
+                downloaded_file = None
+
+                # 1) Most reliable: yt-dlp tells you exactly what it wrote
+                req = info.get("requested_downloads") or []
+                for r in reversed(req):
+                    fp = r.get("filepath")
+                    if fp and os.path.exists(fp):
+                        downloaded_file = fp
+                        break
+
+                # 2) Fallbacks
+                if not downloaded_file:
+                    fp = info.get("filepath") or info.get("_filename")
+                    if fp and os.path.exists(fp):
+                        downloaded_file = fp
+
+                # 3) Last resort: use prepare_filename, but also prefer a merged .mp4 if it exists
+                if not downloaded_file:
+                    cand = ydl.prepare_filename(info)
+                    base, _ = os.path.splitext(cand)
+                    mp4_cand = base + ".mp4"
+                    if os.path.exists(mp4_cand):
+                        downloaded_file = mp4_cand
+                    else:
+                        downloaded_file = cand
+
+                logger.info(
+                    f"Downloaded: ext={info.get('ext')} "
+                    f"format_id={info.get('format_id')} "
+                    f"requested={[(d.get('ext'), d.get('filepath')) for d in (info.get('requested_downloads') or [])]}"
+                )
+
                 return downloaded_file
+
             except Exception as e:
                 logger.error(f"Error downloading {url}: {e}")
                 raise

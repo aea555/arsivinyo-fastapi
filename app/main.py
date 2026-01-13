@@ -64,8 +64,20 @@ async def start_download(request: Request):
             content=Result.fail("INVALID_URL", 400).with_message("URL is required.").dict()
         )
     
+    
     # Get client IP for volume tracking
     client_ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
+    
+    # Clean and validate URL (Youtube Playlist Logic)
+    from app.utils import clean_youtube_url, clean_tiktok_url
+    try:
+        url = clean_youtube_url(url)
+        url = clean_tiktok_url(url)
+    except ValueError as e:
+         return JSONResponse(
+            status_code=400,
+            content=Result.fail("INVALID_URL", 400).with_message(str(e)).dict()
+        )
     
     # --- PRE-FLIGHT SIZE CHECK ---
     # Check file size BEFORE queueing the download task
