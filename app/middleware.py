@@ -103,19 +103,31 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 
                 # Check if already processing
                 if redis_client.is_available() and redis_client.client.exists(idempotency_key):
-                    # Spam protection: increment hits for same URL
-                    spam_hits_key = f"idempotency_hits:{client_ip}"
-                    hits = redis_client.client.incr(spam_hits_key)
-                    if hits == 1:
-                        redis_client.client.expire(spam_hits_key, 60)
-                    
-                    if hits >= 5:
-                        logger.warning(f"[429 SPAM_BAN] IP={client_ip}, hits={hits}")
-                        redis_client.client.set(f"ban:{client_ip}", "true", ex=300) # 5 min ban
-                        return self._fail_response("SPAM_DETECTED", 429, "Spam detected. You are banned for 5 minutes.")
-                    
-                    logger.info(f"[202 IDEMPOTENCY] IP={client_ip}, URL already processing")
-                    return self._fail_response("DOWNLOAD_ALREADY_IN_PROGRESS", 202, "This URL is already being processed.")
+                    # Get the existing task ID and check its status
+                    existing_task_id = redis_client.client.get(idempotency_key)
+                    if existing_task_id:
+                        existing_task_id = existing_task_id.decode() if isinstance(existing_task_id, bytes) else existing_task_id
+                        from app.celery_app import celery_app
+                        task_result = celery_app.AsyncResult(existing_task_id)
+                        
+                        # Only block if task is STILL in progress
+                        if task_result.status in ['PENDING', 'STARTED', 'PROGRESS', 'RETRY']:
+                            # Spam protection: increment hits for same URL
+                            spam_hits_key = f"idempotency_hits:{client_ip}"
+                            hits = redis_client.client.incr(spam_hits_key)
+                            if hits == 1:
+                                redis_client.client.expire(spam_hits_key, 60)
+                            
+                            if hits >= 5:
+                                logger.warning(f"[429 SPAM_BAN] IP={client_ip}, hits={hits}")
+                                redis_client.client.set(f"ban:{client_ip}", "true", ex=300) # 5 min ban
+                                return self._fail_response("SPAM_DETECTED", 429, "Spam detected. You are banned for 5 minutes.")
+                            
+                            logger.info(f"[202 IDEMPOTENCY] IP={client_ip}, URL already processing (task={existing_task_id})")
+                            return self._fail_response("DOWNLOAD_ALREADY_IN_PROGRESS", 202, "This URL is already being processed.")
+                        else:
+                            # Task completed (SUCCESS/FAILURE), allow new download
+                            logger.info(f"Previous task {existing_task_id} completed ({task_result.status}), allowing new download")
             
             # Restore body for the endpoint by creating a new receive callable
             async def receive():
