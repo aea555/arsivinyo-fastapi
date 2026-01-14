@@ -33,6 +33,16 @@ class Downloader:
         else:
             platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
+        
+        # Debug: Log cookie file path and existence
+        if cookie_file:
+            import os as _os
+            cookie_exists = _os.path.exists(cookie_file)
+            logger.info(f"[COOKIE DEBUG] Platform: {platform}, File: {cookie_file}, Exists: {cookie_exists}")
+            if not cookie_exists:
+                logger.warning(f"[COOKIE DEBUG] Cookie file does not exist! CWD: {_os.getcwd()}")
+        else:
+            logger.warning(f"[COOKIE DEBUG] No cookie file found for platform: {platform}")
 
         # Custom options based on platform
         format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
@@ -54,6 +64,11 @@ class Downloader:
             'cookiefile': cookie_file if cookie_file else None,
             'noplaylist': True, # Explicitly disable playlist processing
         }
+        
+        # YouTube-specific: Use iOS client to reduce bot detection on datacenter IPs
+        if platform == "youtube":
+            ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
+            ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=False)
@@ -162,6 +177,11 @@ class Downloader:
             'noplaylist': True, # Explicitly disable playlist processing
             'merge_output_format': 'mp4', # Ensure final container is MP4 (fixes black screen/audio-only issues)
         }
+        
+        # YouTube-specific: Use iOS client to reduce bot detection on datacenter IPs
+        if platform == "youtube":
+            ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
+            ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
