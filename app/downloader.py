@@ -18,14 +18,15 @@ class Downloader:
         from app.cookie_manager import cookie_manager
         
         # Detect platform from URL
-        if "youtube" in url or "youtu.be" in url:
-            platform = "youtube"
-        elif "twitter.com" in url or "x.com" in url:
+        # --- DEPRECATED: YouTube and TikTok are no longer supported ---
+        # if "youtube" in url or "youtu.be" in url:
+        #     platform = "youtube"
+        if "twitter.com" in url or "x.com" in url:
             platform = "twitter"
         elif "instagram.com" in url:
             platform = "instagram"
-        elif "tiktok.com" in url:
-            platform = "tiktok"
+        # elif "tiktok.com" in url:
+        #     platform = "tiktok"
         elif "reddit.com" in url:
             platform = "reddit"
         elif "facebook.com" in url or "fb.watch" in url:
@@ -47,11 +48,12 @@ class Downloader:
         # Custom options based on platform
         format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
         
-        if platform == "tiktok":
-             # Force H.264 (avc) for TikTok to ensure preview compatibility
-             # Use bestvideo+bestaudio to ensure we get both streams if separated
-            format_selector = "best[ext=mp4][vcodec^=avc][acodec!=none]/best[ext=mp4]/best"
-        elif platform == "reddit":
+        # --- DEPRECATED: TikTok is no longer supported ---
+        # if platform == "tiktok":
+        #      # Force H.264 (avc) for TikTok to ensure preview compatibility
+        #      # Use bestvideo+bestaudio to ensure we get both streams if separated
+        #     format_selector = "best[ext=mp4][vcodec^=avc][acodec!=none]/best[ext=mp4]/best"
+        if platform == "reddit":
             # Reddit usually uses DASH/HLS, so we need to validly merge audio+video
             # Metadata is often missing, so we drop filesize constraints to avoid 'No format available'
             format_selector = 'bestvideo+bestaudio/best'
@@ -65,13 +67,20 @@ class Downloader:
             'noplaylist': True, # Explicitly disable playlist processing
         }
         
-        # YouTube-specific: Use iOS client to reduce bot detection on datacenter IPs
-        if platform == "youtube":
-            ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
-            ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
+        # --- DEPRECATED: YouTube is no longer supported ---
+        # if platform == "youtube":
+        #     ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
+        #     ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=False)
+                
+                # Handle quote tweets / multiple media: use only the first (main) entry
+                # This prevents confusion when a quote tweet contains its own video
+                if 'entries' in info and info['entries']:
+                    logger.info(f"Multiple entries detected ({len(info['entries'])}), using first (main) entry")
+                    info = info['entries'][0]
+                
                 return info
             except Exception as e:
                 logger.error(f"Error extracting info for {url}: {e}")
@@ -143,14 +152,15 @@ class Downloader:
         """Download media from the given URL."""
         from app.cookie_manager import cookie_manager
         
-        if "youtube" in url or "youtu.be" in url:
-            platform = "youtube"
-        elif "twitter.com" in url or "x.com" in url:
+        # --- DEPRECATED: YouTube and TikTok are no longer supported ---
+        # if "youtube" in url or "youtu.be" in url:
+        #     platform = "youtube"
+        if "twitter.com" in url or "x.com" in url:
             platform = "twitter"
         elif "instagram.com" in url:
             platform = "instagram"
-        elif "tiktok.com" in url:
-            platform = "tiktok"
+        # elif "tiktok.com" in url:
+        #     platform = "tiktok"
         elif "reddit.com" in url:
             platform = "reddit"
         elif "facebook.com" in url or "fb.watch" in url:
@@ -162,10 +172,11 @@ class Downloader:
         # Base options - prefer formats with known size, limit to 50MB
         format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
         
-        if platform == "tiktok":
-             # Force H.264 (avc) for TikTok
-             format_selector = 'bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-        elif platform == "reddit":
+        # --- DEPRECATED: TikTok is no longer supported ---
+        # if platform == "tiktok":
+        #      # Force H.264 (avc) for TikTok
+        #      format_selector = 'bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        if platform == "reddit":
             format_selector = 'bestvideo+bestaudio/best'
 
         ydl_opts = {
@@ -178,14 +189,20 @@ class Downloader:
             'merge_output_format': 'mp4', # Ensure final container is MP4 (fixes black screen/audio-only issues)
         }
         
-        # YouTube-specific: Use iOS client to reduce bot detection on datacenter IPs
-        if platform == "youtube":
-            ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
-            ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
+        # --- DEPRECATED: YouTube is no longer supported ---
+        # if platform == "youtube":
+        #     ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
+        #     ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=True)
+                
+                # Handle quote tweets / multiple media: use only the first (main) entry
+                if 'entries' in info and info['entries']:
+                    logger.info(f"Multiple entries detected in download ({len(info['entries'])}), using first entry")
+                    info = info['entries'][0]
+                
                 downloaded_file = None
 
                 # 1) Most reliable: yt-dlp tells you exactly what it wrote

@@ -20,3 +20,4 @@ logs/
 firebase-auth.json
 docs/VIP_GUIDE.md
 docs/FULL_DEPLOYMENT.md
+secrets.json
