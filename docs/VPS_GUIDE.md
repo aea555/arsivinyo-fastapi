@@ -57,7 +57,9 @@ Since the files are created by Docker (root), the cleanup script **must run as r
 sudo crontab -e
 
 # Add this line (runs every 30 mins)
-*/30 * * * * cd /home/ubuntu/arsivinyo-fastapi && ./scripts/cleanup_downloads.sh >> /var/log/cleanup.log 2>&1
+# ⚠️ IMPORTANT: Run 'pwd' inside your project folder to get the correct path!
+# Example: If pwd says /root/arsivinyo-fastapi, use that.
+*/30 * * * * cd /path/to/your/arsivinyo-fastapi && ./scripts/cleanup_downloads.sh >> /var/log/cleanup.log 2>&1
 ```
 # Verify crontab
 crontab -l

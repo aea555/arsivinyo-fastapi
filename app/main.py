@@ -79,18 +79,17 @@ async def start_download(request: Request):
         )
     
     
-    # Get client IP for volume tracking
-    client_ip = request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
+    # Get client IP for volume tracking (Prefer Cloudflare Header)
+    client_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
     
-    # Clean and validate URL (Youtube Playlist Logic)
-    from app.utils import clean_youtube_url, clean_tiktok_url
+    # Validate that URL is from a supported platform
+    from app.utils import validate_supported_platform
     try:
-        url = clean_youtube_url(url)
-        url = clean_tiktok_url(url)
+        validate_supported_platform(url)
     except ValueError as e:
-         return JSONResponse(
+        return JSONResponse(
             status_code=400,
-            content=Result.fail("INVALID_URL", 400).with_message(str(e)).dict()
+            content=Result.fail("UNSUPPORTED_PLATFORM", 400).with_message(str(e)).dict()
         )
     
     # --- PRE-FLIGHT SIZE CHECK ---
@@ -154,11 +153,11 @@ async def start_download(request: Request):
         
     except Exception as e:
         logger.error(f"Pre-flight check failed for {url}: {e}")
+        # Production-safe error message
+        error_message = "Medya bilgisi alınamadı. Lütfen URL'yi kontrol edip tekrar deneyin."
         return JSONResponse(
             status_code=400,
-            content=Result.fail("PREFLIGHT_FAILED", 400).with_message(
-                f"Could not verify media info: {str(e)}"
-            ).dict()
+            content=Result.fail("PREFLIGHT_FAILED", 400).with_message(error_message).dict()
         )
     
     # Trigger Celery Task with client IP for volume tracking
@@ -192,7 +191,11 @@ async def get_status(task_id: str):
         response_data.update(task_result.result)
         return Result.ok("TASK_COMPLETED").with_data(response_data)
     elif task_result.status == 'FAILURE':
-        return Result.fail("TASK_FAILED", 500).with_data({"error": str(task_result.info)})
+        # Log the actual error but return a safe message to the user
+        logger.error(f"Task {task_id} failed: {task_result.info}")
+        return Result.fail("TASK_FAILED", 500).with_message(
+            "İndirme işlemi başarısız oldu. Lütfen daha sonra tekrar deneyin."
+        )
     else:
         # PENDING or PROGRESS
         info = task_result.info if isinstance(task_result.info, dict) else {"status": str(task_result.info)}
@@ -268,7 +271,9 @@ async def get_file(task_id: str, background_tasks: BackgroundTasks):
             logger.error(f"Could not list downloads dir: {e}")
             return JSONResponse(
                 status_code=500,
-                content=Result.fail("INTERNAL_ERROR", 500).with_message(str(e)).dict()
+                content=Result.fail("INTERNAL_ERROR", 500).with_message(
+                    "Dosya aranırken bir hata oluştu."
+                ).dict()
             )
     
     # 1. OPTIMAL: Use X-Accel-Redirect for Nginx to serve the file

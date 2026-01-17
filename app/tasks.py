@@ -64,5 +64,8 @@ def download_media_task(self, url: str, client_ip: str = "unknown"):
         
     except Exception as e:
         logger.error(f"Task failed for {url}: {e}")
-        return Result.fail("DOWNLOAD_FAILED", 500).with_message(str(e)).dict()
+        # Production-safe error message - don't expose internal details
+        return Result.fail("DOWNLOAD_FAILED", 500).with_message(
+            "İndirme işlemi başarısız oldu. Lütfen daha sonra tekrar deneyin."
+        ).dict()
 
