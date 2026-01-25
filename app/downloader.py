@@ -71,20 +71,40 @@ class Downloader:
         # if platform == "youtube":
         #     ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
         #     ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # Client rotation logic for YouTube reliability ("The Quirk") - applied to get_info too
+        clients = [None]
+        if platform == "youtube":
+            clients = ['android', 'ios', 'tv_embedded', 'web']
+
+        last_exception = None
+
+        for client in clients:
+            if client:
+                logger.info(f"Attempting info extraction with client: {client}")
+                ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+
             try:
-                info = ydl.extract_info(url, download=False)
-                
-                # Handle quote tweets / multiple media: use only the first (main) entry
-                # This prevents confusion when a quote tweet contains its own video
-                if 'entries' in info and info['entries']:
-                    logger.info(f"Multiple entries detected ({len(info['entries'])}), using first (main) entry")
-                    info = info['entries'][0]
-                
-                return info
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    
+                    # Handle quote tweets / multiple media: use only the first (main) entry
+                    # This prevents confusion when a quote tweet contains its own video
+                    if 'entries' in info and info['entries']:
+                        logger.info(f"Multiple entries detected ({len(info['entries'])}), using first (main) entry")
+                        info = info['entries'][0]
+                    
+                    return info
             except Exception as e:
-                logger.error(f"Error extracting info for {url}: {e}")
-                raise
+                if platform == "youtube" and client != clients[-1]:
+                    logger.warning(f"Info extraction failed with client {client}: {e}. Retrying with next client...")
+                    last_exception = e
+                    continue
+                else:
+                    logger.error(f"Error extracting info for {url}: {e}")
+                    raise
+
+        if last_exception:
+            raise last_exception
 
     def estimate_file_size_mb(self, info: Dict[str, Any]) -> Tuple[float, str]:
         """
