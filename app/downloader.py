@@ -60,11 +60,11 @@ class Downloader:
              
         ydl_opts = {
             'quiet': True,
-            'no_warnings': True,    
-            # Prefer formats with known filesize, limit to 50MB
-            'format': format_selector,
+            'no_warnings': True,
+            # 'format': format_selector, # Disable format selector for get_info to ensure we get metadata
             'cookiefile': cookie_file if cookie_file else None,
-            'noplaylist': True, # Explicitly disable playlist processing
+            'noplaylist': True, 
+            'no_cache_dir': True, # crucial to avoid using cached, banned signatures
         }
         
         # --- DEPRECATED: YouTube is no longer supported ---
@@ -207,6 +207,7 @@ class Downloader:
             'cookiefile': cookie_file if cookie_file else None,
             'noplaylist': True, # Explicitly disable playlist processing
             'merge_output_format': 'mp4', # Ensure final container is MP4 (fixes black screen/audio-only issues)
+            'no_cache_dir': True, # crucial
         }
         
         # Client rotation logic for YouTube reliability ("The Quirk")
