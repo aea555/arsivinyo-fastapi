@@ -18,10 +18,10 @@ class Downloader:
         from app.cookie_manager import cookie_manager
         
         # Detect platform from URL
-        # --- DEPRECATED: YouTube and TikTok are no longer supported ---
-        # if "youtube" in url or "youtu.be" in url:
-        #     platform = "youtube"
-        if "twitter.com" in url or "x.com" in url:
+        # --- DEPRECATED: TikTok is no longer supported ---
+        if "youtube" in url or "youtu.be" in url:
+            platform = "youtube"
+        elif "twitter.com" in url or "x.com" in url:
             platform = "twitter"
         elif "instagram.com" in url:
             platform = "instagram"
@@ -152,10 +152,10 @@ class Downloader:
         """Download media from the given URL."""
         from app.cookie_manager import cookie_manager
         
-        # --- DEPRECATED: YouTube and TikTok are no longer supported ---
-        # if "youtube" in url or "youtu.be" in url:
-        #     platform = "youtube"
-        if "twitter.com" in url or "x.com" in url:
+        # --- DEPRECATED: TikTok is no longer supported ---
+        if "youtube" in url or "youtu.be" in url:
+            platform = "youtube"
+        elif "twitter.com" in url or "x.com" in url:
             platform = "twitter"
         elif "instagram.com" in url:
             platform = "instagram"
@@ -189,57 +189,72 @@ class Downloader:
             'merge_output_format': 'mp4', # Ensure final container is MP4 (fixes black screen/audio-only issues)
         }
         
-        # --- DEPRECATED: YouTube is no longer supported ---
-        # if platform == "youtube":
-        #     ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
-        #     ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
+        # Client rotation logic for YouTube reliability ("The Quirk")
+        clients = [None]
+        if platform == "youtube":
+            clients = ['android', 'ios', 'tv_embedded', 'web']
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        last_exception = None
+
+        for client in clients:
+            if client:
+                logger.info(f"Attempting download with client: {client}")
+                ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+
             try:
-                info = ydl.extract_info(url, download=True)
-                
-                # Handle quote tweets / multiple media: use only the first (main) entry
-                if 'entries' in info and info['entries']:
-                    logger.info(f"Multiple entries detected in download ({len(info['entries'])}), using first entry")
-                    info = info['entries'][0]
-                
-                downloaded_file = None
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    
+                    # Handle quote tweets / multiple media: use only the first (main) entry
+                    if 'entries' in info and info['entries']:
+                        logger.info(f"Multiple entries detected in download ({len(info['entries'])}), using first entry")
+                        info = info['entries'][0]
+                    
+                    downloaded_file = None
 
-                # 1) Most reliable: yt-dlp tells you exactly what it wrote
-                req = info.get("requested_downloads") or []
-                for r in reversed(req):
-                    fp = r.get("filepath")
-                    if fp and os.path.exists(fp):
-                        downloaded_file = fp
-                        break
+                    # 1) Most reliable: yt-dlp tells you exactly what it wrote
+                    req = info.get("requested_downloads") or []
+                    for r in reversed(req):
+                        fp = r.get("filepath")
+                        if fp and os.path.exists(fp):
+                            downloaded_file = fp
+                            break
 
-                # 2) Fallbacks
-                if not downloaded_file:
-                    fp = info.get("filepath") or info.get("_filename")
-                    if fp and os.path.exists(fp):
-                        downloaded_file = fp
+                    # 2) Fallbacks
+                    if not downloaded_file:
+                        fp = info.get("filepath") or info.get("_filename")
+                        if fp and os.path.exists(fp):
+                            downloaded_file = fp
 
-                # 3) Last resort: use prepare_filename, but also prefer a merged .mp4 if it exists
-                if not downloaded_file:
-                    cand = ydl.prepare_filename(info)
-                    base, _ = os.path.splitext(cand)
-                    mp4_cand = base + ".mp4"
-                    if os.path.exists(mp4_cand):
-                        downloaded_file = mp4_cand
-                    else:
-                        downloaded_file = cand
+                    # 3) Last resort: use prepare_filename, but also prefer a merged .mp4 if it exists
+                    if not downloaded_file:
+                        cand = ydl.prepare_filename(info)
+                        base, _ = os.path.splitext(cand)
+                        mp4_cand = base + ".mp4"
+                        if os.path.exists(mp4_cand):
+                            downloaded_file = mp4_cand
+                        else:
+                            downloaded_file = cand
 
-                logger.info(
-                    f"Downloaded: ext={info.get('ext')} "
-                    f"format_id={info.get('format_id')} "
-                    f"requested={[(d.get('ext'), d.get('filepath')) for d in (info.get('requested_downloads') or [])]}"
-                )
+                    logger.info(
+                        f"Downloaded: ext={info.get('ext')} "
+                        f"format_id={info.get('format_id')} "
+                        f"requested={[(d.get('ext'), d.get('filepath')) for d in (info.get('requested_downloads') or [])]}"
+                    )
 
-                return downloaded_file
+                    return downloaded_file
 
             except Exception as e:
-                logger.error(f"Error downloading {url}: {e}")
-                raise
+                if platform == "youtube" and client != clients[-1]:
+                    logger.warning(f"Download failed with client {client}: {e}. Retrying with next client...")
+                    last_exception = e
+                    continue
+                else:
+                    logger.error(f"Error downloading {url}: {e}")
+                    raise
+
+        if last_exception:
+            raise last_exception
 
     def check_file_size(self, info: Dict[str, Any], limit_mb: int = 50) -> bool:
         """Check if the predicted file size is within limits.

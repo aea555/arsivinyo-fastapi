@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, FileResponse
 from scalar_fastapi import get_scalar_api_reference
 from app.schemas.result import Result
@@ -25,7 +26,26 @@ app = FastAPI(
     redoc_url=None if is_production else "/redoc",
 )
 
-from fastapi.middleware.cors import CORSMiddleware
+@app.middleware("http")
+async def block_browser_clients(request: Request, call_next):
+    # Block CORS preflight outright
+    if request.method == "OPTIONS":
+        return JSONResponse(
+            status_code=403,
+            content=Result.fail("FORBIDDEN", 403).with_message("Browser access is not allowed").dict(),
+        )
+
+    # Block requests that look like browser JS
+    origin = request.headers.get("origin")
+    sec_fetch_site = request.headers.get("sec-fetch-site")
+
+    if origin or sec_fetch_site:
+        return JSONResponse(
+            status_code=403,
+            content=Result.fail("FORBIDDEN", 403).with_message("Browser access is not allowed").dict(),
+        )
+
+    return await call_next(request)
 
 # Add Scalar API Reference (modern documentation UI)
 @app.get("/scalar", include_in_schema=False)
@@ -34,18 +54,6 @@ async def scalar_docs():
         openapi_url=app.openapi_url,
         title=app.title,
     )
-
-# CORS Configuration
-# Since this is a Mobile API secured by App Check, we can be permissive with CORS
-# to allow usage of tools like Scalar/Swagger and development from local web.
-# Real security comes from the App Check token, not the Origin header.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (App Check protects us)
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Add Security Middleware
 app.add_middleware(SecurityMiddleware)
@@ -61,6 +69,34 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content=Result.fail("INTERNAL_ERROR", 500)
         .with_message(error_message)
+        .dict()
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=Result.fail("HTTP_ERROR", exc.status_code)
+        .with_message(exc.detail)
+        .dict()
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Don't expose internal pydantic errors in production
+    if is_production:
+        return JSONResponse(
+            status_code=422,
+            content=Result.fail("VALIDATION_ERROR", 422)
+            .with_message("Invalid request parameters.")
+            .dict()
+        )
+        
+    return JSONResponse(
+        status_code=422,
+        content=Result.fail("VALIDATION_ERROR", 422)
+        .with_message("Validation error")
+        .with_data({"errors": exc.errors()})  # Only safe in dev
         .dict()
     )
 
@@ -83,9 +119,13 @@ async def start_download(request: Request):
     client_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", request.client.host).split(",")[0]
     
     # Validate that URL is from a supported platform
-    from app.utils import validate_supported_platform
+    # Validate that URL is from a supported platform
+    from app.utils import validate_supported_platform, clean_youtube_url
     try:
-        validate_supported_platform(url)
+        platform = validate_supported_platform(url)
+        if platform == "youtube":
+            url = clean_youtube_url(url)
+            logger.info(f"Cleaned YouTube URL: {url}")
     except ValueError as e:
         return JSONResponse(
             status_code=400,
