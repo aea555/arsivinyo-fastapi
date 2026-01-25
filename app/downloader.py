@@ -34,6 +34,14 @@ class Downloader:
         else:
             platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
+
+        # Retrieve advanced configuration from environment
+        proxy_url = os.getenv("PROXY_URL")
+        po_token = os.getenv("YOUTUBE_PO_TOKEN")
+        visitor_data = os.getenv("YOUTUBE_VISITOR_DATA")
+        
+        if proxy_url:
+            logger.info(f"Using Proxy: {proxy_url}")
         
         # Debug: Log cookie file path and existence - ESCALATED TO ERROR FOR DEBUGGING
         if cookie_file:
@@ -65,6 +73,7 @@ class Downloader:
             'cookiefile': cookie_file if cookie_file else None,
             'noplaylist': True, 
             'no_cache_dir': True, # crucial to avoid using cached, banned signatures
+            'proxy': proxy_url if proxy_url else None,
         }
         
         # --- DEPRECATED: YouTube is no longer supported ---
@@ -90,7 +99,20 @@ class Downloader:
             
             if client:
                 logger.error(f"[CLIENT DEBUG] Attempting info extraction with client: {client}, cookies={use_cookies}")
-                current_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+                
+                # Construct extractor_args
+                extractor_args = {'youtube': {'player_client': [client]}}
+                
+                # Inject PoT / Visitor Data for 'web' client if available
+                if client == 'web' and (po_token or visitor_data):
+                    if po_token:
+                        logger.info("Injecting PO Token into web client args")
+                        extractor_args['youtube']['po_token'] = [f"web+{po_token}"]
+                    if visitor_data:
+                        logger.info("Injecting Visitor Data into web client args")
+                        extractor_args['youtube']['visitor_data'] = [visitor_data]
+                        
+                current_opts['extractor_args'] = extractor_args
             
             if not use_cookies:
                  current_opts['cookiefile'] = None
@@ -209,6 +231,14 @@ class Downloader:
             platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
 
+        # Retrieve advanced configuration from environment
+        proxy_url = os.getenv("PROXY_URL")
+        po_token = os.getenv("YOUTUBE_PO_TOKEN")
+        visitor_data = os.getenv("YOUTUBE_VISITOR_DATA")
+        
+        if proxy_url:
+            logger.info(f"Using Proxy: {proxy_url}")
+
         # Base options - prefer formats with known size, limit to 50MB
         format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
         
@@ -228,6 +258,7 @@ class Downloader:
             'noplaylist': True, # Explicitly disable playlist processing
             'merge_output_format': 'mp4', # Ensure final container is MP4 (fixes black screen/audio-only issues)
             'no_cache_dir': True, # crucial
+            'proxy': proxy_url if proxy_url else None,
         }
         
         # Advanced Client Strategy: Rotate clients AND header/cookie modes
@@ -248,7 +279,35 @@ class Downloader:
             
             if client:
                 logger.error(f"[CLIENT DEBUG] Attempting download with client: {client}, cookies={use_cookies}")
-                current_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+                
+                # Construct extractor_args
+                extractor_args = {'youtube': {'player_client': [client]}}
+                
+                # Inject PoT / Visitor Data for 'web' client if available
+                if client == 'web' and (po_token or visitor_data):
+                    if po_token:
+                        logger.info("Injecting PO Token into web client args")
+                        extractor_args['youtube']['po_token'] = [f"web+{po_token}"]
+                    if visitor_data:
+                        logger.info("Injecting Visitor Data into web client args")
+                        extractor_args['youtube']['visitor_data'] = [visitor_data]
+                        
+                current_opts['extractor_args'] = extractor_args
+                
+                # Inject PoT / Visitor Data for 'web' client if available
+                # These are CRITICAL for bypassing "Sign in to confirm you're not a bot"
+                if client == 'web' and (po_token or visitor_data):
+                    web_args = extractor_args['youtube'].get('player_client', [])
+                    
+                    if po_token:
+                        logger.info("Injecting PO Token into web client args")
+                        extractor_args['youtube']['po_token'] = [f"web+{po_token}"]
+                    
+                    if visitor_data:
+                        logger.info("Injecting Visitor Data into web client args")
+                        extractor_args['youtube']['visitor_data'] = [visitor_data]
+                        
+                current_opts['extractor_args'] = extractor_args
             
             if not use_cookies:
                  current_opts['cookiefile'] = None
