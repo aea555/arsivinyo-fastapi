@@ -201,7 +201,13 @@ async def start_download(request: Request):
         )
     
     # Trigger Celery Task with client IP for volume tracking
-    task = download_media_task.delay(url, client_ip)
+    # Use apply_async to set dynamic timeouts (1 hour for VIP, 10 mins for regular)
+    time_limit = 3600 if is_vip else 600
+    task = download_media_task.apply_async(
+        args=[url, client_ip, is_vip],
+        time_limit=time_limit,
+        soft_time_limit=time_limit - 60 # 1 minute cleanup buffer
+    )
     
     # Store task mapping in Redis for idempotency (matching hash in middleware)
     import hashlib

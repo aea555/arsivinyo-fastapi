@@ -210,7 +210,7 @@ class Downloader:
         return 0, 'unknown'
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    def download(self, url: str, filename: Optional[str] = None) -> str:
+    def download(self, url: str, filename: Optional[str] = None, is_vip: bool = False) -> str:
         """Download media from the given URL."""
         from app.cookie_manager import cookie_manager
         
@@ -248,6 +248,12 @@ class Downloader:
         #      format_selector = 'bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best'
         if platform == "reddit":
             format_selector = 'bestvideo+bestaudio/best'
+        
+        # VIP Mode Override: Bypass 50MB limit
+        if is_vip:
+            logger.info("VIP Mode enabled: Bypassing filesize limits.")
+            # Use 'best' to get best single file, or merge best video+audio
+            format_selector = 'best/bestvideo+bestaudio'
 
         ydl_opts = {
             'format': format_selector,
