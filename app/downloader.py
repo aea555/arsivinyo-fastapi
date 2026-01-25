@@ -35,15 +35,15 @@ class Downloader:
             platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
         
-        # Debug: Log cookie file path and existence
+        # Debug: Log cookie file path and existence - ESCALATED TO ERROR FOR DEBUGGING
         if cookie_file:
             import os as _os
             cookie_exists = _os.path.exists(cookie_file)
-            logger.info(f"[COOKIE DEBUG] Platform: {platform}, File: {cookie_file}, Exists: {cookie_exists}")
+            logger.error(f"[COOKIE DEBUG] Platform: {platform}, File: {cookie_file}, Exists: {cookie_exists}")
             if not cookie_exists:
-                logger.warning(f"[COOKIE DEBUG] Cookie file does not exist! CWD: {_os.getcwd()}")
+                logger.error(f"[COOKIE DEBUG] Cookie file does not exist! CWD: {_os.getcwd()}")
         else:
-            logger.warning(f"[COOKIE DEBUG] No cookie file found for platform: {platform}")
+            logger.error(f"[COOKIE DEBUG] No cookie file found for platform: {platform}")
 
         # Custom options based on platform
         format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
@@ -80,12 +80,12 @@ class Downloader:
 
         for client in clients:
             if client:
-                logger.info(f"Attempting info extraction with client: {client}")
+                logger.error(f"[CLIENT DEBUG] Attempting info extraction with client: {client}")
                 ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
             
             # --- DEBUG: Log options to confirm cookie path is present ---
             if cookie_file:
-                 logger.info(f"Using cookie file: {ydl_opts.get('cookiefile')}")
+                 logger.error(f"[COOKIE DEBUG] Using cookie file: {ydl_opts.get('cookiefile')}")
             # ------------------------------------------------------------
 
             try:
@@ -224,7 +224,7 @@ class Downloader:
 
         for client in clients:
             if client:
-                logger.info(f"Attempting download with client: {client}")
+                logger.error(f"[CLIENT DEBUG] Attempting download with client: {client}")
                 ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
 
             try:

@@ -13,12 +13,12 @@ class CookieManager:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.cookies_dir = os.path.join(base_dir, cookies_dir)
         
-        logger.info(f"CookieManager initialized with absolute path: {self.cookies_dir}")
+        logger.error(f"[COOKIE DEBUG] CookieManager initialized with absolute path: {self.cookies_dir}")
         
         if not os.path.exists(self.cookies_dir):
             try:
                 os.makedirs(self.cookies_dir)
-                logger.info(f"Created cookies directory at: {self.cookies_dir}")
+                logger.error(f"[COOKIE DEBUG] Created cookies directory at: {self.cookies_dir}")
             except Exception as e:
                 logger.error(f"Failed to create cookies directory: {e}")
 
@@ -48,7 +48,7 @@ class CookieManager:
         filepath = os.path.join(platform_dir, filename)
         with open(filepath, "w") as f:
             f.write(content)
-        logger.info(f"Added cookie file for {platform}: {filename}")
+        logger.error(f"[COOKIE DEBUG] Added cookie file for {platform}: {filename}")
 
 # Global instance
 cookie_manager = CookieManager()
