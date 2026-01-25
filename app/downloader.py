@@ -82,6 +82,11 @@ class Downloader:
             if client:
                 logger.info(f"Attempting info extraction with client: {client}")
                 ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+            
+            # --- DEBUG: Log options to confirm cookie path is present ---
+            if cookie_file:
+                 logger.info(f"Using cookie file: {ydl_opts.get('cookiefile')}")
+            # ------------------------------------------------------------
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
