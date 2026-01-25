@@ -71,42 +71,57 @@ class Downloader:
         # if platform == "youtube":
         #     ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
         #     ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
-        # Client rotation logic for YouTube reliability ("The Quirk") - applied to get_info too
-        clients = [None]
-        if platform == "youtube":
-            clients = ['android', 'ios', 'tv_embedded', 'web']
+        # Advanced Client Strategy: Rotate clients AND header/cookie modes
+        # Sometimes sending cookies causes the block (IP mismatch), so we try without them too.
+        strategies = [
+            ('android', True),
+            ('ios', True),
+            ('tv_embedded', True),
+            ('web', True),
+            ('android', False), # Try without cookies (Incognito)
+            ('web', False),     # Try web without cookies
+        ]
 
         last_exception = None
 
-        for client in clients:
-            if client:
-                logger.error(f"[CLIENT DEBUG] Attempting info extraction with client: {client}")
-                ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+        for client, use_cookies in strategies:
+            # Prepare options for this strategy
+            current_opts = ydl_opts.copy()
             
-            # --- DEBUG: Log options to confirm cookie path is present ---
-            if cookie_file:
-                 logger.error(f"[COOKIE DEBUG] Using cookie file: {ydl_opts.get('cookiefile')}")
-            # ------------------------------------------------------------
+            if client:
+                logger.error(f"[CLIENT DEBUG] Attempting info extraction with client: {client}, cookies={use_cookies}")
+                current_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+            
+            if not use_cookies:
+                 current_opts['cookiefile'] = None
+                 logger.error(f"[COOKIE DEBUG] Strategy requires NO cookies. Unsetting cookiefile.")
+            else:
+                 # Ensure cookie file is set if available
+                 if cookie_file:
+                     current_opts['cookiefile'] = cookie_file
+                     logger.error(f"[COOKIE DEBUG] Strategy using cookie file: {cookie_file}")
+                 else:
+                     logger.error(f"[COOKIE DEBUG] Strategy requested cookies but none available.")
 
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                with yt_dlp.YoutubeDL(current_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
                     
-                    # Handle quote tweets / multiple media: use only the first (main) entry
-                    # This prevents confusion when a quote tweet contains its own video
+                    # Handle quote tweets / multiple media
                     if 'entries' in info and info['entries']:
                         logger.info(f"Multiple entries detected ({len(info['entries'])}), using first (main) entry")
                         info = info['entries'][0]
                     
                     return info
             except Exception as e:
-                if platform == "youtube" and client != clients[-1]:
-                    logger.warning(f"Info extraction failed with client {client}: {e}. Retrying with next client...")
-                    last_exception = e
-                    continue
-                else:
-                    logger.error(f"Error extracting info for {url}: {e}")
+                # If this was the last strategy, raise the error
+                if (client, use_cookies) == strategies[-1]:
+                    logger.error(f"All strategies failed. Last error: {e}")
                     raise
+                
+                logger.warning(f"Info extraction failed with client {client} (cookies={use_cookies}): {e}. Retrying...")
+                last_exception = e
+                continue
 
         if last_exception:
             raise last_exception
@@ -215,20 +230,34 @@ class Downloader:
             'no_cache_dir': True, # crucial
         }
         
-        # Client rotation logic for YouTube reliability ("The Quirk")
-        clients = [None]
-        if platform == "youtube":
-            clients = ['android', 'ios', 'tv_embedded', 'web']
+        # Advanced Client Strategy: Rotate clients AND header/cookie modes
+        strategies = [
+            ('android', True),
+            ('ios', True),
+            ('tv_embedded', True),
+            ('web', True),
+            ('android', False), # Try without cookies (Incognito)
+            ('web', False),     # Try web without cookies
+        ]
 
         last_exception = None
 
-        for client in clients:
+        for client, use_cookies in strategies:
+            # Prepare options for this strategy
+            current_opts = ydl_opts.copy() # important copy
+            
             if client:
-                logger.error(f"[CLIENT DEBUG] Attempting download with client: {client}")
-                ydl_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+                logger.error(f"[CLIENT DEBUG] Attempting download with client: {client}, cookies={use_cookies}")
+                current_opts['extractor_args'] = {'youtube': {'player_client': [client]}}
+            
+            if not use_cookies:
+                 current_opts['cookiefile'] = None
+            else:
+                 if cookie_file:
+                     current_opts['cookiefile'] = cookie_file
 
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                with yt_dlp.YoutubeDL(current_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                     
                     # Handle quote tweets / multiple media: use only the first (main) entry
@@ -271,13 +300,14 @@ class Downloader:
                     return downloaded_file
 
             except Exception as e:
-                if platform == "youtube" and client != clients[-1]:
-                    logger.warning(f"Download failed with client {client}: {e}. Retrying with next client...")
-                    last_exception = e
-                    continue
-                else:
-                    logger.error(f"Error downloading {url}: {e}")
+                # If this was the last strategy, raise the error
+                if (client, use_cookies) == strategies[-1]:
+                    logger.error(f"Downloader failed all strategies. Last error: {e}")
                     raise
+                
+                logger.warning(f"Download failed with client {client} (cookies={use_cookies}): {e}. Retrying...")
+                last_exception = e
+                continue
 
         if last_exception:
             raise last_exception
