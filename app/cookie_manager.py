@@ -9,9 +9,18 @@ class CookieManager:
     """Manages a pool of cookie files for different platforms to avoid being blocked."""
     
     def __init__(self, cookies_dir: str = "cookies"):
-        self.cookies_dir = cookies_dir
-        if not os.path.exists(cookies_dir):
-            os.makedirs(cookies_dir)
+        # Resolve absolute path relative to the project root (one level up from app/)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.cookies_dir = os.path.join(base_dir, cookies_dir)
+        
+        logger.error(f"[COOKIE DEBUG] CookieManager initialized with absolute path: {self.cookies_dir}")
+        
+        if not os.path.exists(self.cookies_dir):
+            try:
+                os.makedirs(self.cookies_dir)
+                logger.error(f"[COOKIE DEBUG] Created cookies directory at: {self.cookies_dir}")
+            except Exception as e:
+                logger.error(f"Failed to create cookies directory: {e}")
 
     def get_cookie_file(self, platform: str) -> Optional[str]:
         """Returns a random cookie file path for the given platform."""
@@ -39,7 +48,7 @@ class CookieManager:
         filepath = os.path.join(platform_dir, filename)
         with open(filepath, "w") as f:
             f.write(content)
-        logger.info(f"Added cookie file for {platform}: {filename}")
+        logger.error(f"[COOKIE DEBUG] Added cookie file for {platform}: {filename}")
 
 # Global instance
 cookie_manager = CookieManager()

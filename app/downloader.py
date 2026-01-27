@@ -18,10 +18,10 @@ class Downloader:
         from app.cookie_manager import cookie_manager
         
         # Detect platform from URL
-        # --- DEPRECATED: YouTube and TikTok are no longer supported ---
-        # if "youtube" in url or "youtu.be" in url:
-        #     platform = "youtube"
-        if "twitter.com" in url or "x.com" in url:
+        # --- DEPRECATED: TikTok is no longer supported ---
+        if "youtube" in url or "youtu.be" in url:
+            platform = "youtube"
+        elif "twitter.com" in url or "x.com" in url:
             platform = "twitter"
         elif "instagram.com" in url:
             platform = "instagram"
@@ -34,16 +34,24 @@ class Downloader:
         else:
             platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
+
+        # Retrieve advanced configuration from environment
+        proxy_url = os.getenv("PROXY_URL")
+        po_token = os.getenv("YOUTUBE_PO_TOKEN")
+        visitor_data = os.getenv("YOUTUBE_VISITOR_DATA")
         
-        # Debug: Log cookie file path and existence
+        if proxy_url:
+            logger.info(f"Using Proxy: {proxy_url}")
+        
+        # Debug: Log cookie file path and existence - ESCALATED TO ERROR FOR DEBUGGING
         if cookie_file:
             import os as _os
             cookie_exists = _os.path.exists(cookie_file)
-            logger.info(f"[COOKIE DEBUG] Platform: {platform}, File: {cookie_file}, Exists: {cookie_exists}")
+            logger.error(f"[COOKIE DEBUG] Platform: {platform}, File: {cookie_file}, Exists: {cookie_exists}")
             if not cookie_exists:
-                logger.warning(f"[COOKIE DEBUG] Cookie file does not exist! CWD: {_os.getcwd()}")
+                logger.error(f"[COOKIE DEBUG] Cookie file does not exist! CWD: {_os.getcwd()}")
         else:
-            logger.warning(f"[COOKIE DEBUG] No cookie file found for platform: {platform}")
+            logger.error(f"[COOKIE DEBUG] No cookie file found for platform: {platform}")
 
         # Custom options based on platform
         format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
@@ -60,31 +68,85 @@ class Downloader:
              
         ydl_opts = {
             'quiet': True,
-            'no_warnings': True,    
-            # Prefer formats with known filesize, limit to 50MB
-            'format': format_selector,
+            'no_warnings': True,
+            # 'format': format_selector, # Disable format selector for get_info to ensure we get metadata
             'cookiefile': cookie_file if cookie_file else None,
-            'noplaylist': True, # Explicitly disable playlist processing
+            'noplaylist': True, 
+            'no_cache_dir': True, # crucial to avoid using cached, banned signatures
+            'proxy': proxy_url if proxy_url else None,
         }
         
         # --- DEPRECATED: YouTube is no longer supported ---
         # if platform == "youtube":
         #     ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
         #     ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # Advanced Client Strategy: Rotate clients AND header/cookie modes
+        # Sometimes sending cookies causes the block (IP mismatch), so we try without them too.
+        strategies = [
+            ('android', True),
+            ('ios', True),
+            ('tv_embedded', True),
+            ('web', True),
+            ('android', False), # Try without cookies (Incognito)
+            ('web', False),     # Try web without cookies
+        ]
+
+        last_exception = None
+
+        for client, use_cookies in strategies:
+            # Prepare options for this strategy
+            current_opts = ydl_opts.copy()
+            
+            if client:
+                logger.error(f"[CLIENT DEBUG] Attempting info extraction with client: {client}, cookies={use_cookies}")
+                
+                # Construct extractor_args
+                extractor_args = {'youtube': {'player_client': [client]}}
+                
+                # Inject PoT / Visitor Data for 'web' client if available
+                if client == 'web' and (po_token or visitor_data):
+                    if po_token:
+                        logger.info("Injecting PO Token into web client args")
+                        extractor_args['youtube']['po_token'] = [f"web+{po_token}"]
+                    if visitor_data:
+                        logger.info("Injecting Visitor Data into web client args")
+                        extractor_args['youtube']['visitor_data'] = [visitor_data]
+                        
+                current_opts['extractor_args'] = extractor_args
+            
+            if not use_cookies:
+                 current_opts['cookiefile'] = None
+                 logger.error(f"[COOKIE DEBUG] Strategy requires NO cookies. Unsetting cookiefile.")
+            else:
+                 # Ensure cookie file is set if available
+                 if cookie_file:
+                     current_opts['cookiefile'] = cookie_file
+                     logger.error(f"[COOKIE DEBUG] Strategy using cookie file: {cookie_file}")
+                 else:
+                     logger.error(f"[COOKIE DEBUG] Strategy requested cookies but none available.")
+
             try:
-                info = ydl.extract_info(url, download=False)
-                
-                # Handle quote tweets / multiple media: use only the first (main) entry
-                # This prevents confusion when a quote tweet contains its own video
-                if 'entries' in info and info['entries']:
-                    logger.info(f"Multiple entries detected ({len(info['entries'])}), using first (main) entry")
-                    info = info['entries'][0]
-                
-                return info
+                with yt_dlp.YoutubeDL(current_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    
+                    # Handle quote tweets / multiple media
+                    if 'entries' in info and info['entries']:
+                        logger.info(f"Multiple entries detected ({len(info['entries'])}), using first (main) entry")
+                        info = info['entries'][0]
+                    
+                    return info
             except Exception as e:
-                logger.error(f"Error extracting info for {url}: {e}")
-                raise
+                # If this was the last strategy, raise the error
+                if (client, use_cookies) == strategies[-1]:
+                    logger.error(f"All strategies failed. Last error: {e}")
+                    raise
+                
+                logger.warning(f"Info extraction failed with client {client} (cookies={use_cookies}): {e}. Retrying...")
+                last_exception = e
+                continue
+
+        if last_exception:
+            raise last_exception
 
     def estimate_file_size_mb(self, info: Dict[str, Any]) -> Tuple[float, str]:
         """
@@ -148,14 +210,14 @@ class Downloader:
         return 0, 'unknown'
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    def download(self, url: str, filename: Optional[str] = None) -> str:
+    def download(self, url: str, filename: Optional[str] = None, is_vip: bool = False) -> str:
         """Download media from the given URL."""
         from app.cookie_manager import cookie_manager
         
-        # --- DEPRECATED: YouTube and TikTok are no longer supported ---
-        # if "youtube" in url or "youtu.be" in url:
-        #     platform = "youtube"
-        if "twitter.com" in url or "x.com" in url:
+        # --- DEPRECATED: TikTok is no longer supported ---
+        if "youtube" in url or "youtu.be" in url:
+            platform = "youtube"
+        elif "twitter.com" in url or "x.com" in url:
             platform = "twitter"
         elif "instagram.com" in url:
             platform = "instagram"
@@ -169,6 +231,14 @@ class Downloader:
             platform = "generic"
         cookie_file = cookie_manager.get_cookie_file(platform)
 
+        # Retrieve advanced configuration from environment
+        proxy_url = os.getenv("PROXY_URL")
+        po_token = os.getenv("YOUTUBE_PO_TOKEN")
+        visitor_data = os.getenv("YOUTUBE_VISITOR_DATA")
+        
+        if proxy_url:
+            logger.info(f"Using Proxy: {proxy_url}")
+
         # Base options - prefer formats with known size, limit to 50MB
         format_selector = 'best[filesize<50M]/best[filesize_approx<50M]/best'
         
@@ -178,6 +248,12 @@ class Downloader:
         #      format_selector = 'bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best'
         if platform == "reddit":
             format_selector = 'bestvideo+bestaudio/best'
+        
+        # VIP Mode Override: Bypass 50MB limit
+        if is_vip:
+            logger.info("VIP Mode enabled: Bypassing filesize limits.")
+            # Use 'best' to get best single file, or merge best video+audio
+            format_selector = 'best/bestvideo+bestaudio'
 
         ydl_opts = {
             'format': format_selector,
@@ -187,59 +263,119 @@ class Downloader:
             'cookiefile': cookie_file if cookie_file else None,
             'noplaylist': True, # Explicitly disable playlist processing
             'merge_output_format': 'mp4', # Ensure final container is MP4 (fixes black screen/audio-only issues)
+            'no_cache_dir': True, # crucial
+            'proxy': proxy_url if proxy_url else None,
         }
         
-        # --- DEPRECATED: YouTube is no longer supported ---
-        # if platform == "youtube":
-        #     ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios']}}
-        #     ydl_opts['sleep_interval_requests'] = 1  # 1 second between API requests
+        # Advanced Client Strategy: Rotate clients AND header/cookie modes
+        strategies = [
+            ('android', True),
+            ('ios', True),
+            ('tv_embedded', True),
+            ('web', True),
+            ('android', False), # Try without cookies (Incognito)
+            ('web', False),     # Try web without cookies
+        ]
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        last_exception = None
+
+        for client, use_cookies in strategies:
+            # Prepare options for this strategy
+            current_opts = ydl_opts.copy() # important copy
+            
+            if client:
+                logger.error(f"[CLIENT DEBUG] Attempting download with client: {client}, cookies={use_cookies}")
+                
+                # Construct extractor_args
+                extractor_args = {'youtube': {'player_client': [client]}}
+                
+                # Inject PoT / Visitor Data for 'web' client if available
+                if client == 'web' and (po_token or visitor_data):
+                    if po_token:
+                        logger.info("Injecting PO Token into web client args")
+                        extractor_args['youtube']['po_token'] = [f"web+{po_token}"]
+                    if visitor_data:
+                        logger.info("Injecting Visitor Data into web client args")
+                        extractor_args['youtube']['visitor_data'] = [visitor_data]
+                        
+                current_opts['extractor_args'] = extractor_args
+                
+                # Inject PoT / Visitor Data for 'web' client if available
+                # These are CRITICAL for bypassing "Sign in to confirm you're not a bot"
+                if client == 'web' and (po_token or visitor_data):
+                    web_args = extractor_args['youtube'].get('player_client', [])
+                    
+                    if po_token:
+                        logger.info("Injecting PO Token into web client args")
+                        extractor_args['youtube']['po_token'] = [f"web+{po_token}"]
+                    
+                    if visitor_data:
+                        logger.info("Injecting Visitor Data into web client args")
+                        extractor_args['youtube']['visitor_data'] = [visitor_data]
+                        
+                current_opts['extractor_args'] = extractor_args
+            
+            if not use_cookies:
+                 current_opts['cookiefile'] = None
+            else:
+                 if cookie_file:
+                     current_opts['cookiefile'] = cookie_file
+
             try:
-                info = ydl.extract_info(url, download=True)
-                
-                # Handle quote tweets / multiple media: use only the first (main) entry
-                if 'entries' in info and info['entries']:
-                    logger.info(f"Multiple entries detected in download ({len(info['entries'])}), using first entry")
-                    info = info['entries'][0]
-                
-                downloaded_file = None
+                with yt_dlp.YoutubeDL(current_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    
+                    # Handle quote tweets / multiple media: use only the first (main) entry
+                    if 'entries' in info and info['entries']:
+                        logger.info(f"Multiple entries detected in download ({len(info['entries'])}), using first entry")
+                        info = info['entries'][0]
+                    
+                    downloaded_file = None
 
-                # 1) Most reliable: yt-dlp tells you exactly what it wrote
-                req = info.get("requested_downloads") or []
-                for r in reversed(req):
-                    fp = r.get("filepath")
-                    if fp and os.path.exists(fp):
-                        downloaded_file = fp
-                        break
+                    # 1) Most reliable: yt-dlp tells you exactly what it wrote
+                    req = info.get("requested_downloads") or []
+                    for r in reversed(req):
+                        fp = r.get("filepath")
+                        if fp and os.path.exists(fp):
+                            downloaded_file = fp
+                            break
 
-                # 2) Fallbacks
-                if not downloaded_file:
-                    fp = info.get("filepath") or info.get("_filename")
-                    if fp and os.path.exists(fp):
-                        downloaded_file = fp
+                    # 2) Fallbacks
+                    if not downloaded_file:
+                        fp = info.get("filepath") or info.get("_filename")
+                        if fp and os.path.exists(fp):
+                            downloaded_file = fp
 
-                # 3) Last resort: use prepare_filename, but also prefer a merged .mp4 if it exists
-                if not downloaded_file:
-                    cand = ydl.prepare_filename(info)
-                    base, _ = os.path.splitext(cand)
-                    mp4_cand = base + ".mp4"
-                    if os.path.exists(mp4_cand):
-                        downloaded_file = mp4_cand
-                    else:
-                        downloaded_file = cand
+                    # 3) Last resort: use prepare_filename, but also prefer a merged .mp4 if it exists
+                    if not downloaded_file:
+                        cand = ydl.prepare_filename(info)
+                        base, _ = os.path.splitext(cand)
+                        mp4_cand = base + ".mp4"
+                        if os.path.exists(mp4_cand):
+                            downloaded_file = mp4_cand
+                        else:
+                            downloaded_file = cand
 
-                logger.info(
-                    f"Downloaded: ext={info.get('ext')} "
-                    f"format_id={info.get('format_id')} "
-                    f"requested={[(d.get('ext'), d.get('filepath')) for d in (info.get('requested_downloads') or [])]}"
-                )
+                    logger.info(
+                        f"Downloaded: ext={info.get('ext')} "
+                        f"format_id={info.get('format_id')} "
+                        f"requested={[(d.get('ext'), d.get('filepath')) for d in (info.get('requested_downloads') or [])]}"
+                    )
 
-                return downloaded_file
+                    return downloaded_file
 
             except Exception as e:
-                logger.error(f"Error downloading {url}: {e}")
-                raise
+                # If this was the last strategy, raise the error
+                if (client, use_cookies) == strategies[-1]:
+                    logger.error(f"Downloader failed all strategies. Last error: {e}")
+                    raise
+                
+                logger.warning(f"Download failed with client {client} (cookies={use_cookies}): {e}. Retrying...")
+                last_exception = e
+                continue
+
+        if last_exception:
+            raise last_exception
 
     def check_file_size(self, info: Dict[str, Any], limit_mb: int = 50) -> bool:
         """Check if the predicted file size is within limits.

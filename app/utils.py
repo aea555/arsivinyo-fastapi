@@ -6,6 +6,7 @@ SUPPORTED_PLATFORMS = {
     "instagram": ["instagram.com"],
     "facebook": ["facebook.com", "fb.watch"],
     "reddit": ["reddit.com"],
+    "youtube": ["youtube.com", "youtu.be"],
 }
 
 
@@ -36,42 +37,45 @@ def validate_supported_platform(url: str) -> str:
     )
 
 
-# ----- DEPRECATED: YouTube and TikTok are no longer supported -----
-# These functions are kept commented for reference but will not be used.
+def clean_youtube_url(url: str) -> str:
+    """
+    Cleans YouTube URLs:
+    1. Extracts 'v' parameter (video ID).
+    2. Removes playlist-related params ('list', 'index', 'start_radio', 'rv').
+    3. Reconstructs a clean video URL.
+    4. Raises ValueError if it's a playlist URL without a video ID.
+    5. Handles YouTube Shorts properly.
+    """
+    parsed = urlparse(url)
+    
+    # Check if it is a YouTube URL
+    if "youtube.com" not in parsed.netloc and "youtu.be" not in parsed.netloc:
+        return url
+        
+    # Handle short URLs (youtu.be/ID)
+    if "youtu.be" in parsed.netloc:
+        # Path is /ID
+        return url
+        
+    # Handle /shorts/ID URLs
+    if "/shorts/" in parsed.path:
+        # Already clean enough, just strip query params if any
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
 
-# def clean_youtube_url(url: str) -> str:
-#     """
-#     Cleans YouTube URLs:
-#     1. Extracts 'v' parameter (video ID).
-#     2. Removes playlist-related params ('list', 'index', 'start_radio', 'rv').
-#     3. Reconstructs a clean video URL.
-#     4. Raises ValueError if it's a playlist URL without a video ID.
-#     """
-#     parsed = urlparse(url)
-#     
-#     # Check if it is a YouTube URL
-#     if "youtube.com" not in parsed.netloc and "youtu.be" not in parsed.netloc:
-#         return url
-#         
-#     # Handle short URLs (youtu.be/ID)
-#     if "youtu.be" in parsed.netloc:
-#         # Path is /ID
-#         return url
-#         
-#     query_params = parse_qs(parsed.query)
-#     
-#     # Check if it has a video ID ('v')
-#     if 'v' in query_params:
-#         video_id = query_params['v'][0]
-#         # Reconstruct pure video URL
-#         return f"https://www.youtube.com/watch?v={video_id}"
-#     
-#     # If no 'v' but has 'list', it's a pure playlist page -> REJECT
-#     if 'list' in query_params:
-#         raise ValueError("Playlist downloads are not supported. Please provide a single video URL.")
-#         
-#     # If neither, just return original (might be channel page or something else, let yt-dlp handle or fail)
-#     return url
+    query_params = parse_qs(parsed.query)
+    
+    # Check if it has a video ID ('v')
+    if 'v' in query_params:
+        video_id = query_params['v'][0]
+        # Reconstruct pure video URL
+        return f"https://www.youtube.com/watch?v={video_id}"
+    
+    # If no 'v' but has 'list', it's a pure playlist page -> REJECT
+    if 'list' in query_params:
+        raise ValueError("Playlist downloads are not supported. Please provide a single video URL.")
+        
+    # If neither, just return original (might be channel page or something else, let yt-dlp handle or fail)
+    return url
 
 # def clean_tiktok_url(url: str) -> str:
 #     """
