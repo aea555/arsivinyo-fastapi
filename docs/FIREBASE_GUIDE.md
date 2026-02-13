@@ -1,37 +1,56 @@
 # Firebase App Check Setup Guide
 
-Your backend is already configured to use **Firebase App Check** to prevent abuse. This ensures that only requests coming from your authentic app (signed by Apple/Google) are accepted.
+This backend can enforce **Firebase App Check** for non-VIP requests. Enforcement is controlled by environment configuration.
 
 ## 1. Get the Service Account Key
 
-You need a generic "Service Account" JSON file that grants your backend "Admin" access to your Firebase project.
+You need a Firebase service account JSON file so the backend can verify App Check tokens.
 
-1.  Go to the **[Firebase Console](https://console.firebase.google.com/)**.
-2.  Click the **Gear Icon ⚙️** next to checking "Project Overview" -> **Project settings**.
-3.  Go to the **Service accounts** tab.
-4.  Click **Generate new private key**.
-5.  Click **Generate key**.
-6.  This will download a `.json` file to your computer.
+1. Go to the [Firebase Console](https://console.firebase.google.com/).
+2. Open **Project settings**.
+3. Open the **Service accounts** tab.
+4. Click **Generate new private key**.
+5. Save the downloaded JSON file.
 
 ## 2. Install the File
 
-1.  Rename the downloaded file to: `firebase-auth.json`
-2.  Move it to the root folder of this project.
+1. Rename the downloaded file to `firebase-auth.json`.
+2. Move it to the root of this project.
+3. Ensure `.env` contains:
 
-## 3. Enable Protection (Production Mode)
+```env
+FIREBASE_SERVICE_ACCOUNT_JSON=/app/firebase-auth.json
+```
 
-Once the file is in place, you can enforce security by switching to production mode.
+## 3. Choose Enforcement Mode
 
-1.  Open `.env` file.
-2.  Change `ENV=development` to `ENV=production`.
-3.  Restart containers:
-    ```bash
-    docker compose down && docker compose up -d
-    ```
+Set this in `.env`:
 
-**What happens next?**
--   **If File Missing + Production:** The API will log a warning and block requests (or fail securely).
--   **If File Present + Production:** The API will verify the `X-Firebase-AppCheck` header on every request. Requests without a valid token will receive `401 Unauthorized`.
+```env
+REQUIRE_FIREBASE_APPCHECK=true
+```
 
-> [!IMPORTANT]  
-> Make sure your mobile app sends the `X-Firebase-AppCheck` header! You need to implement App Check in your React Native / Expo app using `@react-native-firebase/app-check`.
+- `true`: non-VIP requests must include valid `X-Firebase-AppCheck`.
+- `false`: App Check is not required.
+
+VIP requests (`X-App-Secret` matches `APP_SECRET_KEY`) bypass App Check checks.
+
+## 4. Restart Services
+
+```bash
+docker compose down && docker compose up -d
+```
+
+## 5. Runtime Behavior Summary
+
+- `REQUIRE_FIREBASE_APPCHECK=false`: App Check is skipped for regular users and VIP users.
+- `REQUIRE_FIREBASE_APPCHECK=true` + valid Firebase file: non-VIP requires valid token.
+- `REQUIRE_FIREBASE_APPCHECK=true` + missing/invalid Firebase file: non-VIP receives `503 SERVICE_UNAVAILABLE`.
+
+## 6. Client Header
+
+When App Check is enabled for non-VIP clients, the mobile app must send:
+
+```http
+X-Firebase-AppCheck: <valid_token>
+```
