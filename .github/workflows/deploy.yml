@@ -19,7 +19,6 @@ jobs:
             # hata oluşursa durdur
             set -e 
             cd ~/arsivinyo-fastapi/
-            docker compose down
             git fetch origin
             git checkout -f dev || git checkout -b dev origin/dev
             git reset --hard origin/dev
