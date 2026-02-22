@@ -10,6 +10,8 @@ services:
       resources:
         limits:
           memory: 128M
+    networks:
+      - fastapi-network
 
   api:
     build: .
@@ -28,6 +30,8 @@ services:
       resources:
         limits:
           memory: 512M
+    networks:
+      - fastapi-network
 
   worker:
     build: .
@@ -43,6 +47,8 @@ services:
       resources:
         limits:
           memory: 1G
+    networks:
+      - fastapi-network
 
   nginx:
     image: nginx:1.29.4-alpine-slim
@@ -58,6 +64,16 @@ services:
       resources:
         limits:
           memory: 64M
+    networks:
+      - fastapi-network
+      - shared-services
 
 volumes:
   redis_data:
+
+networks:
+  fastapi-network:
+    driver: bridge
+  shared-services:
+    external: true
+    name: ${SHARED_SERVICES_NETWORK:-arsivinyo-shared}
