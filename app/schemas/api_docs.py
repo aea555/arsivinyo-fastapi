@@ -25,6 +25,14 @@ class DownloadRequest(BaseModel):
         description="Public media URL to download (YouTube, Instagram, TikTok, X, etc.).",
         examples=["https://www.youtube.com/shorts/vNxl7L3Zuck"],
     )
+    cookie_profile: str | None = Field(
+        default=None,
+        description=(
+            "Optional deterministic cookie profile for platform cookie pools. "
+            "Matches filename or filename stem under cookies/<platform>/."
+        ),
+        examples=["primary", "twitter_main.txt"],
+    )
 
 
 class DownloadStartedData(BaseModel):

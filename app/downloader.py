@@ -13,7 +13,7 @@ class Downloader:
         if not os.path.exists(download_path):
             os.makedirs(download_path)
 
-    def get_info(self, url: str) -> Dict[str, Any]:
+    def get_info(self, url: str, cookie_profile: Optional[str] = None) -> Dict[str, Any]:
         """Extract information from the URL without downloading."""
         from app.cookie_manager import cookie_manager
         
@@ -33,7 +33,7 @@ class Downloader:
             platform = "facebook"
         else:
             platform = "generic"
-        cookie_file = cookie_manager.get_cookie_file(platform)
+        cookie_file = cookie_manager.get_cookie_file(platform, cookie_profile)
 
         # Retrieve advanced configuration from environment
         proxy_url = os.getenv("PROXY_URL")
@@ -210,7 +210,13 @@ class Downloader:
         return 0, 'unknown'
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    def download(self, url: str, filename: Optional[str] = None, is_vip: bool = False) -> str:
+    def download(
+        self,
+        url: str,
+        filename: Optional[str] = None,
+        is_vip: bool = False,
+        cookie_profile: Optional[str] = None,
+    ) -> str:
         """Download media from the given URL."""
         from app.cookie_manager import cookie_manager
         
@@ -229,7 +235,7 @@ class Downloader:
             platform = "facebook"
         else:
             platform = "generic"
-        cookie_file = cookie_manager.get_cookie_file(platform)
+        cookie_file = cookie_manager.get_cookie_file(platform, cookie_profile)
 
         # Retrieve advanced configuration from environment
         proxy_url = os.getenv("PROXY_URL")

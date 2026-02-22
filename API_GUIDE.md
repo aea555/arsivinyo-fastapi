@@ -51,6 +51,11 @@ X-Firebase-AppCheck: <valid_token>
 
 > Not: VIP header artık Nginx üzerinden geçen isteklerde de backend'e iletilir.
 
+İstemci IP öncelik sırası:
+- `CF-Connecting-IP`
+- `X-Real-IP`
+- `X-Forwarded-For`
+
 ---
 
 ## 📡 API Endpoints
@@ -77,7 +82,8 @@ POST /download
 Content-Type: application/json
 
 {
-  "url": "https://www.youtube.com/shorts/vNxl7L3Zuck"
+  "url": "https://www.youtube.com/shorts/vNxl7L3Zuck",
+  "cookie_profile": "primary"
 }
 ```
 **Response (202 Accepted):**
@@ -128,6 +134,14 @@ GET /status/{task_id}
   }
 }
 ```
+
+---
+
+### 3.1 İndirme Görevini İptal Et
+```http
+POST /status/{task_id}/cancel
+```
+Bu endpoint iptal isteğini kuyruğa iletir; takip için `/status/{task_id}` kullanılmalıdır.
 
 ---
 

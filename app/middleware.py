@@ -60,8 +60,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         # 1. Get Client IP (Prefer Cloudflare Header)
         client_ip = request.headers.get("CF-Connecting-IP") or request.headers.get(
-            "X-Forwarded-For", request.client.host
-        ).split(",")[
+            "X-Real-IP"
+        ) or request.headers.get("X-Forwarded-For", request.client.host).split(",")[
             0
         ]
 
@@ -135,7 +135,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             url = body.get("url", "")
             if url:
-                url_hash = hashlib.sha256(url.encode()).hexdigest()
+                cookie_profile = body.get("cookie_profile", "")
+                hash_input = f"{url}|{cookie_profile}"
+                url_hash = hashlib.sha256(hash_input.encode()).hexdigest()
                 idempotency_key = f"download_status:{url_hash}"
 
                 # Check if already processing

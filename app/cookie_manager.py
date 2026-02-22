@@ -22,8 +22,14 @@ class CookieManager:
             except Exception as e:
                 logger.error(f"Failed to create cookies directory: {e}")
 
-    def get_cookie_file(self, platform: str) -> Optional[str]:
-        """Returns a random cookie file path for the given platform."""
+    def get_cookie_file(self, platform: str, profile: Optional[str] = None) -> Optional[str]:
+        """Returns a cookie file path for a platform.
+
+        If profile is provided, selection is deterministic:
+        - exact filename match
+        - filename match without extension
+        Otherwise returns a random cookie file path.
+        """
         platform_dir = os.path.join(self.cookies_dir, platform)
         if not os.path.exists(platform_dir):
             return None
@@ -36,6 +42,15 @@ class CookieManager:
         
         if not cookie_files:
             return None
+
+        if profile:
+            normalized = profile.strip().lower()
+            for file_path in cookie_files:
+                filename = os.path.basename(file_path).lower()
+                stem = os.path.splitext(filename)[0]
+                if filename == normalized or stem == normalized:
+                    return file_path
+            logger.warning(f"[COOKIE DEBUG] Cookie profile '{profile}' not found for platform '{platform}'")
             
         return random.choice(cookie_files)
 

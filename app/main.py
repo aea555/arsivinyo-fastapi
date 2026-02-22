@@ -229,7 +229,8 @@ async def start_download(payload: DownloadRequest, request: Request):
 
     # Get client IP for volume tracking (Prefer Cloudflare Header)
     client_ip = request.headers.get("CF-Connecting-IP") or request.headers.get(
-        "X-Forwarded-For", request.client.host
+        "X-Real-IP"
+    ) or request.headers.get("X-Forwarded-For", request.client.host
     ).split(",")[
         0
     ]
@@ -254,7 +255,7 @@ async def start_download(payload: DownloadRequest, request: Request):
 
     try:
         downloader = Downloader()
-        info = downloader.get_info(url)
+        info = downloader.get_info(url, cookie_profile=payload.cookie_profile)
 
         # Get estimated file size using improved multi-method estimation
         size_mb, estimation_method = downloader.estimate_file_size_mb(info)
@@ -323,7 +324,7 @@ async def start_download(payload: DownloadRequest, request: Request):
     # Use apply_async to set dynamic timeouts (1 hour for VIP, 10 mins for regular)
     time_limit = 3600 if is_vip else 600
     task = download_media_task.apply_async(
-        args=[url, client_ip, is_vip],
+        args=[url, client_ip, is_vip, payload.cookie_profile],
         time_limit=time_limit,
         soft_time_limit=time_limit - 60,  # 1 minute cleanup buffer
     )
@@ -331,7 +332,8 @@ async def start_download(payload: DownloadRequest, request: Request):
     # Store task mapping in Redis for idempotency (matching hash in middleware)
     import hashlib
 
-    url_hash = hashlib.sha256(url.encode()).hexdigest()
+    hash_input = f"{url}|{payload.cookie_profile or ''}"
+    url_hash = hashlib.sha256(hash_input.encode()).hexdigest()
     if redis_client.is_available():
         redis_client.client.set(f"download_status:{url_hash}", task.id, ex=3600)
 
@@ -369,6 +371,10 @@ async def get_status(
     if task_result.status == "SUCCESS":
         response_data.update(task_result.result)
         return Result.ok("TASK_COMPLETED").with_data(response_data)
+    if task_result.status == "REVOKED":
+        return Result.fail("TASK_CANCELLED", 200).with_data(response_data).with_message(
+            "Task cancelled."
+        )
     if task_result.status == "FAILURE":
         # Log the actual error but return a safe message to the user
         logger.error(f"Task {task_id} failed: {task_result.info}")
@@ -384,6 +390,20 @@ async def get_status(
     )
     response_data.update(info)
     return Result.ok("TASK_IN_PROGRESS").with_data(response_data)
+
+
+@app.post(
+    "/status/{task_id}/cancel",
+    tags=["Downloads"],
+    summary="Cancel asynchronous task",
+    responses=SECURITY_RESPONSES,
+    dependencies=[Depends(security_header_docs)],
+)
+async def cancel_task(
+    task_id: str = Path(..., description="Task ID returned by /download."),
+):
+    celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+    return Result.ok("TASK_CANCEL_REQUESTED").with_data({"task_id": task_id})
 
 
 def cleanup_file(path: str):
