@@ -3,12 +3,9 @@ from app.downloader import Downloader
 from app.metadata import update_creation_time
 from app.schemas.result import Result
 from app.redis_client import redis_client
-from app.schemas.result import Result
-from app.redis_client import redis_client
 from app.config import MAX_FILE_SIZE_MB, VIP_MAX_FILE_SIZE_MB
 import os
 import shutil
-from datetime import datetime
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,14 +26,20 @@ def track_volume(client_ip: str, file_size_mb: float):
     logger.info(f"Volume tracked for {client_ip}: {file_size_mb:.2f}MB (total: {new_volume:.2f}MB)")
 
 @celery_app.task(bind=True, name="app.tasks.download_media")
-def download_media_task(self, url: str, client_ip: str = "unknown", is_vip: bool = False):
+def download_media_task(
+    self,
+    url: str,
+    client_ip: str = "unknown",
+    is_vip: bool = False,
+    cookie_profile: str | None = None,
+):
     """Celery task to download media and update metadata."""
     downloader = Downloader()
     
     try:
         # 1. Extract info FIRST to check file size
         self.update_state(state='PROGRESS', meta={'status': 'Checking file size...'})
-        info = downloader.get_info(url)
+        info = downloader.get_info(url, cookie_profile=cookie_profile)
         
         if is_vip:
             logger.info(f"VIP Task: Using expanded limit ({VIP_MAX_FILE_SIZE_MB}MB) for {url}")
@@ -69,7 +72,7 @@ def download_media_task(self, url: str, client_ip: str = "unknown", is_vip: bool
         
         # 4. Download the media
         self.update_state(state='PROGRESS', meta={'status': 'Downloading...'})
-        file_path = downloader.download(url, is_vip=is_vip)
+        file_path = downloader.download(url, is_vip=is_vip, cookie_profile=cookie_profile)
         
         # 5. Update metadata
         self.update_state(state='PROGRESS', meta={'status': 'Updating metadata...'})
@@ -92,4 +95,3 @@ def download_media_task(self, url: str, client_ip: str = "unknown", is_vip: bool
         return Result.fail("DOWNLOAD_FAILED", 500).with_message(
             "İndirme işlemi başarısız oldu. Lütfen daha sonra tekrar deneyin."
         ).dict()
-

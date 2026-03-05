@@ -38,17 +38,23 @@ Media Downloader API, YouTube, Twitter, Instagram, TikTok, Facebook, Reddit ve d
 
 ## 🔐 Kimlik Doğrulama
 
-### Development Ortamı
-Firebase App Check atlanabilir. Bunun için:
-```
-Header: X-App-Secret: dev_secret_bypass
+Kimlik doğrulama davranışı yapılandırılabilir:
+
+- `X-App-Secret`: `APP_SECRET_KEY` ile eşleşirse VIP bypass aktif olur.
+- `X-Firebase-AppCheck`: Sadece `REQUIRE_FIREBASE_APPCHECK=true` ise ve istek VIP değilse zorunludur.
+
+### Örnek Header'lar
+```http
+X-App-Secret: <APP_SECRET_KEY>
+X-Firebase-AppCheck: <valid_token>
 ```
 
-### Production Ortamı
-Firebase App Check zorunludur:
-```
-Header: X-Firebase-AppCheck: <valid_token>
-```
+> Not: VIP header artık Nginx üzerinden geçen isteklerde de backend'e iletilir.
+
+İstemci IP öncelik sırası:
+- `CF-Connecting-IP`
+- `X-Real-IP`
+- `X-Forwarded-For`
 
 ---
 
@@ -63,6 +69,7 @@ GET /
 {
   "success": true,
   "code": "API_READY",
+  "status_code": 200,
   "message": "Media Downloader API is running."
 }
 ```
@@ -75,7 +82,8 @@ POST /download
 Content-Type: application/json
 
 {
-  "url": "https://www.youtube.com/shorts/vNxl7L3Zuck"
+  "url": "https://www.youtube.com/shorts/vNxl7L3Zuck",
+  "cookie_profile": "primary"
 }
 ```
 **Response (202 Accepted):**
@@ -83,8 +91,10 @@ Content-Type: application/json
 {
   "success": true,
   "code": "DOWNLOAD_STARTED",
+  "status_code": 202,
   "data": {
-    "task_id": "abc123-def456-..."
+    "task_id": "abc123-def456-...",
+    "estimated_size_mb": 12.3
   }
 }
 ```
@@ -100,6 +110,7 @@ GET /status/{task_id}
 {
   "success": true,
   "code": "TASK_IN_PROGRESS",
+  "status_code": 200,
   "data": {
     "task_id": "abc123-def456-...",
     "status": "STARTED"
@@ -112,14 +123,25 @@ GET /status/{task_id}
 {
   "success": true,
   "code": "TASK_COMPLETED",
+  "status_code": 200,
   "data": {
     "task_id": "abc123-def456-...",
     "status": "SUCCESS",
-    "file_path": "/app/downloads/video.mp4",
-    "filename": "video.mp4"
+    "data": {
+      "file_path": "/app/downloads/video.mp4",
+      "filename": "video.mp4"
+    }
   }
 }
 ```
+
+---
+
+### 3.1 İndirme Görevini İptal Et
+```http
+POST /status/{task_id}/cancel
+```
+Bu endpoint iptal isteğini kuyruğa iletir; takip için `/status/{task_id}` kullanılmalıdır.
 
 ---
 
@@ -150,14 +172,18 @@ GET /files/{task_id}
 |-----|------|----------|
 | `API_READY` | 200 | API çalışıyor |
 | `DOWNLOAD_STARTED` | 202 | İndirme başlatıldı |
+| `TASK_IN_PROGRESS` | 200 | Görev hâlâ çalışıyor |
+| `TASK_COMPLETED` | 200 | Görev tamamlandı |
+| `TASK_FAILED` | 200 (payload status_code=500) | Worker görevi başarısız oldu |
 | `INVALID_URL` | 400 | URL geçersiz veya eksik |
-| `INVALID_TOKEN` | 401 | Firebase token geçersiz |
+| `INVALID_TOKEN` | 401 | App Check token eksik/geçersiz |
 | `FILE_NOT_READY` | 404 | Dosya henüz hazır değil |
 | `FILE_NOT_FOUND` | 404 | Dosya bulunamadı |
+| `FILE_TOO_LARGE` | 413 | Dosya boyutu sınırı aşıldı (>50MB) |
 | `TOO_MANY_REQUESTS` | 429 | Rate limit aşıldı |
 | `VOLUME_LIMIT_EXCEEDED` | 429 | Saatlik veri limiti aşıldı |
 | `SPAM_DETECTED` | 429 | Spam tespit edildi, geçici ban |
-| `FILE_TOO_LARGE` | 413 | Dosya boyutu sınırı aşıldı (>50MB) |
+| `SERVICE_UNAVAILABLE` | 503 | App Check zorunlu ama sunucuda yapılandırma eksik |
 | `INTERNAL_ERROR` | 500 | Sunucu hatası |
 
 ---
@@ -276,7 +302,7 @@ const headers = {
   'Content-Type': 'application/json',
   // Development bypass (remove in production)
   ...__DEV__ && { 'X-App-Secret': 'dev_secret_bypass' },
-  // Production: Add Firebase App Check token here
+  // If REQUIRE_FIREBASE_APPCHECK=true, add Firebase App Check token
   // 'X-Firebase-AppCheck': await firebase.appCheck().getToken().then(res => res.token),
 };
 

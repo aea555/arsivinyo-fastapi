@@ -3,13 +3,15 @@ services:
     image: valkey/valkey:9.0-alpine3.23
     container_name: downloader_redis
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     volumes:
       - redis_data:/data
     deploy:
       resources:
         limits:
           memory: 128M
+    networks:
+      - fastapi-network
 
   api:
     build: .
@@ -28,6 +30,8 @@ services:
       resources:
         limits:
           memory: 512M
+    networks:
+      - fastapi-network
 
   worker:
     build: .
@@ -43,12 +47,14 @@ services:
       resources:
         limits:
           memory: 1G
+    networks:
+      - fastapi-network
 
   nginx:
     image: nginx:1.29.4-alpine-slim
     container_name: downloader_nginx
     ports:
-      - "${PORT:-8090}:80"
+      - "127.0.0.1:${PORT:-8090}:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro,z
       - ./downloads:/app/downloads:ro,z
@@ -58,6 +64,16 @@ services:
       resources:
         limits:
           memory: 64M
+    networks:
+      - fastapi-network
+      - shared-services
 
 volumes:
   redis_data:
+
+networks:
+  fastapi-network:
+    driver: bridge
+  shared-services:
+    external: true
+    name: ${SHARED_SERVICES_NETWORK:-arsivinyo-shared}

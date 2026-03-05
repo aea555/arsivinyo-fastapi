@@ -38,7 +38,7 @@
                         "value": "dev_secret_bypass",
                         "type": "text",
                         "disabled": true,
-                        "description": "Enable this to bypass rate limits (Dev only, Direct API port 8000 only)"
+                        "description": "Enable this for trusted VIP clients to bypass limits and App Check"
                     }
                 ],
                 "body": {

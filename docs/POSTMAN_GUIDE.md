@@ -5,78 +5,97 @@ This guide explains how to test the Media Downloader API using Postman.
 ## 1. Import Collection
 
 1. Open Postman.
-2. Click **Import** (top left).
-3. Drag and drop the `docs/postman_collection.json` file.
-4. Or copy/paste the raw JSON content.
+2. Click **Import**.
+3. Import `docs/postman_collection.json`.
 
 ## 2. Configure Environment
 
-The collection uses a variable `{{base_url}}`. You need to set this to your API URL.
+The collection uses `{{base_url}}`.
 
-**For Localhost:**
-- `http://127.0.0.1:8090` (Main Nginx Port)
-- `http://127.0.0.1:8000` (Direct API - Dev Bypass Only)
+For local Docker setup:
+- `http://127.0.0.1:8090` (Nginx gateway, recommended)
+- `http://127.0.0.1:8001` (direct API container port)
 
-**For VPS:**
+For VPS:
 - `http://YOUR_VPS_IP:8090`
-
-To edit the variable:
-1. Click on the collection name **Media Downloader API**.
-2. Go to the **Variables** tab.
-3. Update `Current Value` for `base_url`.
-4. Click **Save** (Ctrl+S).
 
 ## 3. Endpoints
 
-### 🩺 Health Check
+### Health Check
 - **GET** `/`
-- Verifies that the API is running.
+- Expected code: `API_READY`
 
-### 📥 Start Download
+### Start Download
 - **POST** `/download`
-- **Body:**
+- Body:
   ```json
   {
-      "url": "https://www.youtube.com/shorts/..."
+    "url": "https://www.youtube.com/shorts/..."
   }
   ```
-- **Response:**
+- Success (`202`):
   ```json
   {
-      "success": true,
-      "data": {
-          "task_id": "c123..."
-      }
+    "success": true,
+    "code": "DOWNLOAD_STARTED",
+    "status_code": 202,
+    "data": {
+      "task_id": "...",
+      "estimated_size_mb": 12.3
+    }
   }
   ```
 
-### 🔍 Check Status
+### Check Task Status
 - **GET** `/status/:taskId`
-- Replace `:taskId` in the URL with the ID you got from `/download`.
-- **Response (Processing):**
+- In progress (`200`):
   ```json
   {
-      "status": "PROCESSING",
-      "progress": 45
+    "success": true,
+    "code": "TASK_IN_PROGRESS",
+    "status_code": 200,
+    "data": {
+      "task_id": "...",
+      "status": "PENDING"
+    }
   }
   ```
-- **Response (Success):**
+- Completed (`200`):
   ```json
   {
+    "success": true,
+    "code": "TASK_COMPLETED",
+    "status_code": 200,
+    "data": {
+      "task_id": "...",
       "status": "SUCCESS",
-      "result": {
-          "url": "https://...",
-          "filename": "video.mp4"
+      "data": {
+        "file_path": "downloads/...",
+        "filename": "video.mp4"
       }
+    }
   }
   ```
 
-## 4. Handling 429 Errors (Rate Limits)
+### Download File
+- **GET** `/files/:taskId`
+- Success returns binary file stream.
 
-If you see `429 Too Many Requests`:
+## 4. Security Headers
 
-1. **Wait:** The IP ban is temporary (usually 5 mins).
-2. **Dev Bypass (Local Only):**
-   - Change `base_url` to `http://127.0.0.1:8000`.
-   - In the **Start Download** request headers, enable `X-App-Secret`.
-   - Set value to `dev_secret_bypass` (or your secret from `.env`).
+Optional VIP bypass:
+```http
+X-App-Secret: <APP_SECRET_KEY>
+```
+
+Conditional App Check (for non-VIP only when enabled on server):
+```http
+X-Firebase-AppCheck: <valid_token>
+```
+
+## 5. Handling `429` Errors
+
+If you hit `429 TOO_MANY_REQUESTS`:
+1. Wait for cooldown/ban expiry.
+2. Reduce request frequency.
+3. Use VIP header only for trusted clients.
