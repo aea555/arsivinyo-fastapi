@@ -8,13 +8,15 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
     steps:
       - name: Connect to Tailscale (optional)
-        if: ${{ secrets.TS_AUTHKEY != '' }}
+        if: ${{ env.TS_AUTHKEY != '' }}
         continue-on-error: true
         uses: tailscale/github-action@v3
         with:
-          authkey: ${{ secrets.TS_AUTHKEY }}
+          authkey: ${{ env.TS_AUTHKEY }}
 
       - name: Select SSH host (Tailscale first)
         id: ssh_host
@@ -64,7 +66,7 @@ jobs:
             sleep 10
 
       - name: Disconnect Tailscale
-        if: ${{ always() && secrets.TS_AUTHKEY != '' }}
+        if: ${{ always() && env.TS_AUTHKEY != '' }}
         run: |
           set +e
           if command -v tailscale >/dev/null 2>&1; then
