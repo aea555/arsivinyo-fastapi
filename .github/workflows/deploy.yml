@@ -50,6 +50,7 @@ jobs:
       - name: Execute Remote SSH Commands
         uses: appleboy/ssh-action@v1.0.3
         with:
+          command_timeout: 45m
           host: ${{ steps.ssh_host.outputs.host }}
           port: 2558
           username: ${{ secrets.SSH_USER }}
