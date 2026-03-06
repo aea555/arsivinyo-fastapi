@@ -137,7 +137,16 @@ jobs:
             SHARED_NETWORK="${SHARED_NETWORK:-arsivinyo-shared}"
             docker network inspect "${SHARED_NETWORK}" >/dev/null 2>&1 || docker network create "${SHARED_NETWORK}"
 
-            docker compose pull api worker
+            if ! docker pull "${BACKEND_IMAGE}"; then
+              echo "Initial image pull failed. Retrying once after optional docker daemon restart..."
+              docker system df || true
+              if command -v systemctl >/dev/null 2>&1; then
+                sudo -n systemctl restart docker || true
+                sleep 5
+              fi
+              docker pull "${BACKEND_IMAGE}" || exit 1
+            fi
+
             docker compose up -d --no-build --remove-orphans
             sleep 10
             docker compose ps api worker
