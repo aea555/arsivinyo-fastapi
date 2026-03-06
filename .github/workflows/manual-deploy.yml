@@ -133,6 +133,10 @@ jobs:
               printf '\nBACKEND_IMAGE=%s\n' "${BACKEND_IMAGE}" >> .env
             fi
 
+            SHARED_NETWORK="$(grep -E '^SHARED_SERVICES_NETWORK=' .env 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+            SHARED_NETWORK="${SHARED_NETWORK:-arsivinyo-shared}"
+            docker network inspect "${SHARED_NETWORK}" >/dev/null 2>&1 || docker network create "${SHARED_NETWORK}"
+
             docker compose pull api worker
             docker compose up -d --no-build --remove-orphans
             sleep 10

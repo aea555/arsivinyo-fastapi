@@ -61,6 +61,11 @@ jobs:
             git fetch origin
             git checkout -f dev || git checkout -b dev origin/dev
             git reset --hard origin/dev
+
+            SHARED_NETWORK="$(grep -E '^SHARED_SERVICES_NETWORK=' .env 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+            SHARED_NETWORK="${SHARED_NETWORK:-arsivinyo-shared}"
+            docker network inspect "${SHARED_NETWORK}" >/dev/null 2>&1 || docker network create "${SHARED_NETWORK}"
+
             docker compose up -d --build
             # docker image prune -f
             sleep 10
