@@ -36,10 +36,16 @@ IS_PRODUCTION = ENV == "production"
 # Security
 APP_SECRET_KEY = os.getenv("APP_SECRET_KEY")
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+DOWNLOAD_ACCESS_KEY = os.getenv("DOWNLOAD_ACCESS_KEY")
+DOWNLOAD_ACCESS_HEADER_NAME = os.getenv("DOWNLOAD_ACCESS_HEADER_NAME", "X-Download-Access")
 
 # Explicit toggle for App Check requirement.
 # Default: enabled in production, disabled in development.
 REQUIRE_FIREBASE_APPCHECK = get_bool_env("REQUIRE_FIREBASE_APPCHECK", default=IS_PRODUCTION)
+REQUIRE_DOWNLOAD_ACCESS_HEADER = get_bool_env(
+    "REQUIRE_DOWNLOAD_ACCESS_HEADER",
+    default=IS_PRODUCTION,
+)
 
 # Browser access hardening
 # false -> block browser-like requests (origin/sec-fetch-site and preflight)

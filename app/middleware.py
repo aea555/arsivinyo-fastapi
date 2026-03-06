@@ -9,7 +9,14 @@ from firebase_admin import app_check, credentials
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import RATE_LIMIT_REQUESTS_PER_HOUR
-from app.config import APP_SECRET_KEY, FIREBASE_SERVICE_ACCOUNT_JSON, REQUIRE_FIREBASE_APPCHECK
+from app.config import (
+    APP_SECRET_KEY,
+    DOWNLOAD_ACCESS_HEADER_NAME,
+    DOWNLOAD_ACCESS_KEY,
+    FIREBASE_SERVICE_ACCOUNT_JSON,
+    REQUIRE_DOWNLOAD_ACCESS_HEADER,
+    REQUIRE_FIREBASE_APPCHECK,
+)
 from app.logger import get_logger
 from app.redis_client import redis_client
 from app.schemas.result import Result
@@ -36,6 +43,14 @@ elif REQUIRE_FIREBASE_APPCHECK:
 
 def _normalize_header(value: str | None) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _is_download_protected_path(path: str) -> bool:
+    return (
+        path == "/download"
+        or path.startswith("/status/")
+        or path.startswith("/files/")
+    )
 
 
 def _is_vip_request(request: Request) -> bool:
@@ -65,7 +80,35 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             0
         ]
 
-        # 2. VIP / Developer Bypass (X-App-Secret)
+        # 2. Download access gate (required for download-related endpoints)
+        if REQUIRE_DOWNLOAD_ACCESS_HEADER and _is_download_protected_path(request.url.path):
+            expected_access_key = (DOWNLOAD_ACCESS_KEY or "").strip()
+            if not expected_access_key:
+                logger.error(
+                    "REQUIRE_DOWNLOAD_ACCESS_HEADER=true but DOWNLOAD_ACCESS_KEY is missing."
+                )
+                return self._fail_response(
+                    "SERVICE_UNAVAILABLE",
+                    503,
+                    "Download access is not configured on the server.",
+                )
+
+            request_access_key = _normalize_header(
+                request.headers.get(DOWNLOAD_ACCESS_HEADER_NAME)
+            )
+            if not request_access_key or not hmac.compare_digest(
+                request_access_key, expected_access_key
+            ):
+                logger.warning(
+                    f"[403 DOWNLOAD_ACCESS] IP={client_ip}, path={request.url.path}"
+                )
+                return self._fail_response(
+                    "FORBIDDEN",
+                    403,
+                    f"Missing or invalid {DOWNLOAD_ACCESS_HEADER_NAME} header.",
+                )
+
+        # 3. VIP / Developer Bypass (X-App-Secret)
         can_bypass = _is_vip_request(request)
 
         # Store VIP status for endpoints (to skip volume limits etc.)
@@ -75,7 +118,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/download":
             logger.debug(f"IP={client_ip}, can_bypass={can_bypass}")
 
-        # 3. Check if IP is banned
+        # 4. Check if IP is banned
         if redis_client.is_available() and not can_bypass:
             if redis_client.client.exists(f"ban:{client_ip}"):
                 logger.warning(f"[429 BANNED] IP={client_ip}")
@@ -85,7 +128,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     "You are temporarily banned due to spamming.",
                 )
 
-        # 4. Firebase App Check (configurable)
+        # 5. Firebase App Check (configurable)
         # VIP mode must bypass App Check completely.
         if REQUIRE_FIREBASE_APPCHECK and not can_bypass:
             if not firebase_initialized:
@@ -105,7 +148,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 logger.error(f"App Check verification failed: {exc}")
                 return self._fail_response("INVALID_TOKEN", 401, "Invalid App Check token.")
 
-        # 5. Rate Limiting (per hour)
+        # 6. Rate Limiting (per hour)
         if redis_client.is_available() and not can_bypass:
             rate_limit_key = f"rate_limit:{client_ip}"
             current_hits = redis_client.client.incr(rate_limit_key)
@@ -122,7 +165,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         # (Volume limit check moved to API endpoint for pre-flight verification)
 
-        # 6. Idempotency & Spam Detection
+        # 7. Idempotency & Spam Detection
         if request.method == "POST" and "/download" in request.url.path and not can_bypass:
             # Cache the body so it can be read again by the endpoint
             body_bytes = await request.body()

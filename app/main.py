@@ -14,7 +14,11 @@ from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 
 from app.celery_app import celery_app
-from app.config import ALLOW_BROWSER_ACCESS, CORS_ALLOWED_ORIGINS
+from app.config import (
+    ALLOW_BROWSER_ACCESS,
+    CORS_ALLOWED_ORIGINS,
+    DOWNLOAD_ACCESS_HEADER_NAME,
+)
 from app.logger import get_logger
 from app.middleware import SecurityMiddleware
 from app.redis_client import redis_client
@@ -48,7 +52,10 @@ SECURITY_RESPONSES = {
     },
     403: {
         "model": ErrorResponse,
-        "description": "Browser-like clients are blocked when ALLOW_BROWSER_ACCESS=false.",
+        "description": (
+            "Browser-like clients are blocked when ALLOW_BROWSER_ACCESS=false, "
+            "or download access header is missing/invalid."
+        ),
     },
     429: {
         "model": ErrorResponse,
@@ -65,6 +72,7 @@ app = FastAPI(
     description=(
         "Download and serve media from supported platforms with asynchronous processing.\n\n"
         "Security headers:\n"
+        f"- `{DOWNLOAD_ACCESS_HEADER_NAME}`: Required for all download-related endpoints.\n"
         "- `X-App-Secret`: Optional VIP bypass key for trusted clients.\n"
         "- `X-Firebase-AppCheck`: Required for non-VIP requests when `REQUIRE_FIREBASE_APPCHECK=true`."
     ),
@@ -87,6 +95,11 @@ if ALLOW_BROWSER_ACCESS:
 
 
 def security_header_docs(
+    x_download_access: str | None = Header(
+        default=None,
+        alias=DOWNLOAD_ACCESS_HEADER_NAME,
+        description="Required shared secret for download-related endpoints.",
+    ),
     x_app_secret: str | None = Header(
         default=None,
         alias="X-App-Secret",
@@ -102,7 +115,7 @@ def security_header_docs(
     ),
 ) -> None:
     # Header validation is enforced by middleware; this dependency exists for OpenAPI docs.
-    _ = (x_app_secret, x_firebase_appcheck)
+    _ = (x_download_access, x_app_secret, x_firebase_appcheck)
 
 
 @app.middleware("http")

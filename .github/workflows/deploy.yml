@@ -148,8 +148,9 @@ jobs:
             fi
 
             docker compose up -d --no-build --remove-orphans
+            docker compose restart nginx || true
             sleep 10
-            docker compose ps api worker
+            docker compose ps api worker nginx
 
       - name: Disconnect Tailscale
         if: ${{ always() && env.TS_AUTHKEY != '' }}
